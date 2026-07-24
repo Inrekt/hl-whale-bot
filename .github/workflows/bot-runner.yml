@@ -4,6 +4,8 @@ name: bot-runner
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *' # страховка: если цепочка оборвалась, поднимаемся сами
 
 concurrency:
   group: bot-runner
