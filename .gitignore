@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+state/
+*.local
+leaderboard.json
+samples/

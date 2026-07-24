@@ -1,0 +1,49 @@
+# Ежедневный PDF-отчёт в 10:00 МСК (07:00 UTC) всем подписчикам.
+# Идемпотентен по дате (state.lastDailyReport) — ручной перезапуск не дублирует.
+name: daily-report
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-report
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install fonts (Cyrillic + emoji)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-core fonts-noto-color-emoji
+      - run: npm ci
+      - name: Restore state branch as worktree
+        run: |
+          git fetch origin state || true
+          if git rev-parse --quiet --verify origin/state >/dev/null; then
+            git worktree add state origin/state
+          else
+            mkdir -p state
+          fi
+      - name: Build and send report
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          if [ -z "$BOT_TOKEN" ]; then
+            echo "BOT_TOKEN secret is not set — nothing to run yet"
+            exit 0
+          fi
+          npx tsx scripts/daily-report.ts
+      - name: Push state
+        if: always()
+        run: bash scripts/push-state.sh

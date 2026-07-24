@@ -1,0 +1,51 @@
+# 24/7 бот на GitHub Actions: job живёт ~5ч45м (лимит GitHub — 6ч),
+# перед смертью сам запускает следующий. Старт цепочки — вручную (Run workflow).
+name: bot-runner
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: bot-runner
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install fonts (Cyrillic + emoji for cards)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-core fonts-noto-color-emoji
+      - run: npm ci
+      - name: Restore state branch as worktree
+        run: |
+          git fetch origin state || true
+          if git rev-parse --quiet --verify origin/state >/dev/null; then
+            git worktree add state origin/state
+          else
+            git worktree add --orphan -b state state || { git checkout --orphan state && git rm -rf . && git commit --allow-empty -m init && git push origin state && git checkout main && git worktree add state origin/state; }
+          fi
+      - name: Long-poll bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          STATE_GIT: '1'
+        run: |
+          if [ -z "$BOT_TOKEN" ]; then
+            echo "BOT_TOKEN secret is not set — nothing to run yet"
+            exit 0
+          fi
+          npx tsx src/main.ts --max-runtime-minutes 340
+      - name: Chain next run
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run bot-runner.yml -R "$GITHUB_REPOSITORY"
