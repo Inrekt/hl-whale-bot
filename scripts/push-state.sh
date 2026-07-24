@@ -13,9 +13,10 @@ git add -A
 if git diff --cached --quiet; then
   exit 0
 fi
+GIT_ID=(-c user.name="whale-bot" -c user.email="whale-bot@users.noreply.github.com")
 if git rev-parse --quiet --verify HEAD >/dev/null; then
-  git commit --quiet --amend -m "state: $(date -u +%FT%TZ)"
+  git "${GIT_ID[@]}" commit --quiet --amend -m "state: $(date -u +%FT%TZ)"
 else
-  git commit --quiet -m "state: $(date -u +%FT%TZ)"
+  git "${GIT_ID[@]}" commit --quiet -m "state: $(date -u +%FT%TZ)"
 fi
 git push --quiet --force origin HEAD:state
