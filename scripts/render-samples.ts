@@ -20,7 +20,7 @@ const outDir = argValue('--out') ?? 'samples'
 await mkdir(outDir, { recursive: true })
 
 const rows = await fetchLeaderboard(argValue('--leaderboard'))
-const snapshot = await buildSnapshot(pickUniverse(rows, SAMPLE_UNIVERSE))
+const snapshot = await buildSnapshot(pickUniverse(rows).slice(0, SAMPLE_UNIVERSE))
 console.log(`${snapshot.positions.length} positions ≥ $1M`)
 
 const topCoin = coinSkews(snapshot)[0]?.coin ?? 'BTC'

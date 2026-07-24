@@ -9,7 +9,6 @@ import { closeBrowser } from '../src/render/render.js'
 import { loadState, saveState } from '../src/state.js'
 import { mskDateStamp, reportCaption, reportFileName, reportHtml } from '../src/report.js'
 
-const UNIVERSE_SIZE = 350
 
 try {
   process.loadEnvFile('.env')
@@ -36,7 +35,7 @@ if (state.subscribers.length === 0) {
 
 console.log(`building report for ${state.subscribers.length} subscriber(s)…`)
 const leaderboard = await fetchLeaderboard()
-const snapshot = await buildSnapshot(pickUniverse(leaderboard, UNIVERSE_SIZE))
+const snapshot = await buildSnapshot(pickUniverse(leaderboard))
 const pdf = await renderPdf(reportHtml(snapshot))
 const caption = reportCaption(snapshot)
 const fileName = reportFileName()

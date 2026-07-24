@@ -18,12 +18,21 @@ export interface Snapshot {
   readonly positions: readonly WhalePosition[]
 }
 
-/** Picks the whale universe: biggest accounts by current value, plus top PnL makers. */
-export function pickUniverse(rows: readonly LeaderboardRow[], size: number): string[] {
-  const byValue = [...rows].sort((a, b) => b.accountValue - a.accountValue).slice(0, size)
-  const byDayPnl = [...rows].sort((a, b) => b.dayPnl - a.dayPnl).slice(0, Math.floor(size / 4))
-  const unique = new Set([...byValue, ...byDayPnl].map((row) => row.address))
-  return [...unique]
+/**
+ * Минимальный размер счёта для юниверса китов. Калибровано по оригиналу
+ * (scripts/threshold.ts): при $8M профиль совпадает — ~200 позиций ≥ $1M,
+ * средний размер ~$12M. Порог выше → перекос концентрированнее.
+ */
+export const UNIVERSE_MIN_ACCOUNT_USD = 8_000_000
+const UNIVERSE_MAX_WALLETS = 500
+
+/** Picks the whale universe: every account holding at least the floor value. */
+export function pickUniverse(rows: readonly LeaderboardRow[]): string[] {
+  return [...rows]
+    .filter((row) => row.accountValue >= UNIVERSE_MIN_ACCOUNT_USD)
+    .sort((a, b) => b.accountValue - a.accountValue)
+    .slice(0, UNIVERSE_MAX_WALLETS)
+    .map((row) => row.address)
 }
 
 export async function buildSnapshot(addresses: readonly string[]): Promise<Snapshot> {

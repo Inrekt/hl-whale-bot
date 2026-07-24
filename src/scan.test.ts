@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'vitest'
-import { coinSkews, skewPercent, topPositions, totalLongUsd, totalShortUsd, type Snapshot } from './scan.js'
-import type { WhalePosition } from './hl.js'
+import {
+  UNIVERSE_MIN_ACCOUNT_USD,
+  coinSkews,
+  pickUniverse,
+  skewPercent,
+  topPositions,
+  totalLongUsd,
+  totalShortUsd,
+  type Snapshot,
+} from './scan.js'
+import type { LeaderboardRow, WhalePosition } from './hl.js'
 import { shortAddress, signedUsd, usdCompact } from './format.js'
 
 const position = (coin: string, isLong: boolean, sizeUsd: number): WhalePosition => ({
@@ -23,6 +32,24 @@ const snapshot: Snapshot = {
     position('BTC', true, 20_000_000),
   ],
 }
+
+describe('pickUniverse', () => {
+  const row = (address: string, accountValue: number): LeaderboardRow => ({
+    address,
+    accountValue,
+    dayPnl: 0,
+    allTimePnl: 0,
+  })
+
+  test('keeps only accounts at or above the floor, sorted by value', () => {
+    const rows = [
+      row('0xsmall', UNIVERSE_MIN_ACCOUNT_USD - 1),
+      row('0xmid', UNIVERSE_MIN_ACCOUNT_USD),
+      row('0xbig', UNIVERSE_MIN_ACCOUNT_USD * 10),
+    ]
+    expect(pickUniverse(rows)).toEqual(['0xbig', '0xmid'])
+  })
+})
 
 describe('scan aggregates', () => {
   test('long/short totals', () => {

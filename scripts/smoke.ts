@@ -13,7 +13,7 @@ console.log(`Загружаю лидерборд${localPath ? ' (локальн�
 const rows = await fetchLeaderboard(localPath)
 console.log(`Аккаунтов в лидерборде: ${rows.length.toLocaleString('en-US')}`)
 
-const universe = pickUniverse(rows, SMOKE_UNIVERSE_SIZE)
+const universe = pickUniverse(rows).slice(0, SMOKE_UNIVERSE_SIZE)
 console.log(`Сканирую ${universe.length} кошельков…`)
 const startedAt = Date.now()
 const snapshot = await buildSnapshot(universe)

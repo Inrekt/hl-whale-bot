@@ -4,7 +4,6 @@
 import { fetchLeaderboard, type LeaderboardRow } from './hl.js'
 import { buildSnapshot, coinSkews, pickUniverse, type Snapshot } from './scan.js'
 
-const UNIVERSE_SIZE = 350
 const SNAPSHOT_REFRESH_MS = 4 * 60_000
 const LEADERBOARD_REFRESH_MS = 6 * 60 * 60_000
 const TOP_COINS_COUNT = 6
@@ -41,7 +40,7 @@ export class SnapshotService {
     const now = Date.now()
     if (now - this.leaderboardFetchedAt > LEADERBOARD_REFRESH_MS) {
       this.leaderboard = await fetchLeaderboard()
-      this.universe = pickUniverse(this.leaderboard, UNIVERSE_SIZE)
+      this.universe = pickUniverse(this.leaderboard)
       this.leaderboardFetchedAt = now
     }
     this.snapshot = await buildSnapshot(this.universe)
