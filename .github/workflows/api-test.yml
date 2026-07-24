@@ -1,0 +1,26 @@
+# Диагностика: доступен ли Hyperliquid API с раннеров GitHub Actions.
+name: api-test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe leaderboard
+        run: |
+          curl -sS -o /dev/null --max-time 90 \
+            -w "leaderboard: http=%{http_code} size=%{size_download}B time=%{time_total}s\n" \
+            "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard" || echo "leaderboard FAILED"
+      - name: Probe info API
+        run: |
+          curl -sS --max-time 30 -X POST "https://api.hyperliquid.xyz/info" \
+            -H "Content-Type: application/json" \
+            -d '{"type":"clearinghouseState","user":"0x5b5d51203a0f9079f8aeb098a6523a13f298c060"}' \
+            -w "\ninfo: http=%{http_code} time=%{time_total}s\n" | head -c 400 || echo "info FAILED"
+      - name: Probe Telegram API
+        run: |
+          curl -sS -o /dev/null --max-time 30 -w "telegram: http=%{http_code} time=%{time_total}s\n" \
+            "https://api.telegram.org" || echo "telegram FAILED"
