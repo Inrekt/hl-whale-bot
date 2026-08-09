@@ -5,6 +5,7 @@ import {
   coinSkews,
   isMarketMakerBook,
   pickUniverse,
+  resolveCoin,
   skewPercent,
   topPositions,
   totalLongUsd,
@@ -95,6 +96,14 @@ describe('scan aggregates', () => {
     const skews = coinSkews(snapshot)
     expect(skews.map((s) => s.coin)).toEqual(['BTC', 'ETH'])
     expect(skews[0]).toEqual({ coin: 'BTC', longUsd: 20_000_000, shortUsd: 50_000_000 })
+  })
+
+  test('resolveCoin matches case-insensitively and returns the canonical name', () => {
+    const kCoins: Snapshot = { ...snapshot, positions: [position('kPEPE', true, 2_730_000)] }
+    expect(resolveCoin(kCoins, 'kpepe')).toBe('kPEPE')
+    expect(resolveCoin(kCoins, 'KPEPE')).toBe('kPEPE')
+    expect(resolveCoin(snapshot, 'btc')).toBe('BTC')
+    expect(resolveCoin(snapshot, 'doge')).toBeNull()
   })
 
   test('topPositions filters by coin', () => {

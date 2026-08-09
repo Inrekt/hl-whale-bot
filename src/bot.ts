@@ -7,6 +7,7 @@ import { configuredOwner, decideAccess } from './access.js'
 import type { BotState } from './state.js'
 import { SnapshotService } from './snapshot.js'
 import { coinCardHtml, leaderboardCardHtml, sentimentCardHtml, topWhalesCardHtml } from './render/cards.js'
+import { resolveCoin } from './scan.js'
 import { renderCardPng, renderPdf } from './render/render.js'
 import { reportCaption, reportFileName, reportHtml } from './report.js'
 import { shortAddress } from './format.js'
@@ -288,9 +289,8 @@ export function createBot(token: string, deps: BotDeps): Bot {
     // Per-coin slash commands (/btc /eth /hype …) against the live coin list.
     const commandMatch = /^\/([a-zA-Z0-9]{2,12})$/.exec(text)
     if (commandMatch && snapshots.isReady()) {
-      const requested = (commandMatch[1] ?? '').toUpperCase()
-      const known = new Set(snapshots.current().positions.map((p) => p.coin.toUpperCase()))
-      if (known.has(requested)) await showScreen(ctx, await screens.coin(requested))
+      const coin = resolveCoin(snapshots.current(), commandMatch[1] ?? '')
+      if (coin) await showScreen(ctx, await screens.coin(coin))
     }
   })
 

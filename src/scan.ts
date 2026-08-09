@@ -100,6 +100,16 @@ export function coinSkews(snapshot: Snapshot): CoinSkew[] {
     .sort((a, b) => b.longUsd + b.shortUsd - (a.longUsd + a.shortUsd))
 }
 
+/**
+ * Ищет монету по имени без учёта регистра и возвращает её каноническое
+ * написание. Часть перпов Hyperliquid зовётся kPEPE, kBONK, kFLOKI — сравнение
+ * «как есть» с приведённым к верхнему регистру запросом их не находит.
+ */
+export function resolveCoin(snapshot: Snapshot, query: string): string | null {
+  const wanted = query.toUpperCase()
+  return snapshot.positions.find((p) => p.coin.toUpperCase() === wanted)?.coin ?? null
+}
+
 export function topPositions(snapshot: Snapshot, coin: string | null, count: number): WhalePosition[] {
   const pool = coin === null ? snapshot.positions : snapshot.positions.filter((p) => p.coin === coin)
   return pool.slice(0, count)
