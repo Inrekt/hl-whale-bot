@@ -1,6 +1,7 @@
 // Daily / on-demand PDF report: same data core, print-friendly layout.
 // Filename mirrors the reference bot: HL_whales_YYYY-MM-DD_HHMM.pdf (MSK time).
 
+import { REPORT_FONT_FACES } from './render/cards.js'
 import type { Snapshot } from './scan.js'
 import { MIN_POSITION_USD, coinSkews, skewPercent, topPositions, totalLongUsd, totalShortUsd } from './scan.js'
 import { priceCompact, shortAddress, signedUsd, usdCompact } from './format.js'
@@ -66,19 +67,29 @@ export function reportHtml(snapshot: Snapshot): string {
     })
     .join('')
 
+  // Печатная версия того же блоттера: светлый лист, но та же типографика,
+  // те же приглушённые цвета сторон и те же табличные цифры, что в карточках.
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-    body { font-family: -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif; color: #111; font-size: 11px; }
-    h1 { font-size: 19px; margin-bottom: 2px; }
-    .sub { color: #555; margin-bottom: 14px; }
-    h2 { font-size: 14px; margin: 16px 0 6px; }
+    ${REPORT_FONT_FACES}
+    body { font-family: 'Golos', sans-serif; color: #14181F; font-size: 10.5px; padding: 4px 2px; }
+    .eyebrow { font-family: 'Plex', monospace; font-size: 8.5px; letter-spacing: 1.6px;
+      text-transform: uppercase; color: #9A7B2E; }
+    h1 { font-size: 21px; letter-spacing: -.4px; margin: 3px 0 3px; }
+    .sub { font-family: 'Plex', monospace; color: #5C6675; margin-bottom: 16px; font-size: 9.5px; }
+    h2 { font-family: 'Plex', monospace; font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase;
+      color: #9A7B2E; font-weight: 600; margin: 18px 0 6px; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 5px 6px; text-align: left; border-bottom: 1px solid #e3e3e3; }
-    th { background: #f4f5f7; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
-    .pos { color: #067647; font-weight: 700; } .neg { color: #b42318; font-weight: 700; }
-    .mono { font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
-    .footer { margin-top: 18px; color: #888; font-size: 9.5px; }
+    th, td { padding: 6px 6px; text-align: left; border-bottom: 1px solid #E6E3DC; }
+    th { font-family: 'Plex', monospace; font-size: 8.5px; text-transform: uppercase;
+      letter-spacing: .8px; color: #7C8595; border-bottom: 1px solid #14181F; font-weight: 500; }
+    td { font-variant-numeric: tabular-nums; }
+    .pos { color: #2F7D63; font-weight: 600; } .neg { color: #A94E3D; font-weight: 600; }
+    .mono { font-family: 'Plex', monospace; font-size: 9.5px; font-variant-numeric: tabular-nums; }
+    b, strong { font-weight: 600; }
+    .footer { font-family: 'Plex', monospace; margin-top: 20px; color: #98A1AF; font-size: 8.5px; }
   </style></head><body>
-    <h1>🐳 Китовый отчёт · Hyperliquid</h1>
+    <div class="eyebrow">Hyperliquid · умные деньги</div>
+    <h1>Китовый отчёт</h1>
     <div class="sub">${generatedAt} МСК · ${snapshot.scannedWallets} кошельков · ${snapshot.positions.length} позиций ≥ ${usdCompact(MIN_POSITION_USD)} ·
       перекос: <b>${skew >= 0 ? 'ШОРТ' : 'ЛОНГ'} ${Math.abs(skew)}%</b> · лонги ${usdCompact(longUsd)} · шорты ${usdCompact(shortUsd)}</div>
     <h2>Топ-${REPORT_TOP_ROWS} позиций</h2>

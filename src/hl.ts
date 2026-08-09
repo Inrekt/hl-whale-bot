@@ -22,7 +22,19 @@ export interface WhalePosition {
   readonly leverage: number
   readonly entryPx: number
   readonly liquidationPx: number | null
+  /** Текущая цена: стоимость позиции, делённая на её размер в монете. */
+  readonly markPx: number
   readonly unrealizedPnl: number
+}
+
+/**
+ * Насколько цена должна пройти против кита, чтобы его вынесло по ликвидации,
+ * долей от текущей цены. Самое дорогое число в этом деле — и единственное,
+ * которое отличает спокойное плечо 3x от 20x на грани.
+ */
+export function liquidationDistance(position: WhalePosition): number | null {
+  if (position.liquidationPx === null || position.markPx <= 0) return null
+  return Math.abs(position.liquidationPx - position.markPx) / position.markPx
 }
 
 interface RawWindowPerf {
@@ -92,14 +104,16 @@ export async function fetchPositions(address: string): Promise<WhalePosition[]> 
   const state = await postInfo<RawClearinghouseState>({ type: 'clearinghouseState', user: address })
   return state.assetPositions.map(({ position }) => {
     const size = Number(position.szi)
+    const sizeUsd = Number(position.positionValue)
     return {
       address,
       coin: position.coin,
       isLong: size > 0,
-      sizeUsd: Number(position.positionValue),
+      sizeUsd,
       leverage: position.leverage.value,
       entryPx: position.entryPx === null ? 0 : Number(position.entryPx),
       liquidationPx: position.liquidationPx === null ? null : Number(position.liquidationPx),
+      markPx: size === 0 ? 0 : sizeUsd / Math.abs(size),
       unrealizedPnl: Number(position.unrealizedPnl),
     }
   })

@@ -23,6 +23,7 @@ const position = (coin: string, isLong: boolean, sizeUsd: number): WhalePosition
   leverage: 5,
   entryPx: 100,
   liquidationPx: 200,
+  markPx: 110,
   unrealizedPnl: -1000,
 })
 
