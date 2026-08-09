@@ -3,7 +3,7 @@
 
 import { fetchPositions, mapWithConcurrency, type LeaderboardRow, type WhalePosition } from './hl.js'
 
-export const MIN_POSITION_USD = 1_000_000
+export const MIN_POSITION_USD = 500_000
 // Лимит Hyperliquid — 1200 единиц веса в минуту на IP, запрос позиций весит 2,
 // то есть допустимо ~600 запросов в минуту. При 10 параллельных и ~1с на запрос
 // выходит ~600/мин — впритык к потолку, поэтому выше не поднимаем.
@@ -84,6 +84,23 @@ export function skewPercent(longUsd: number, shortUsd: number): number {
   const total = longUsd + shortUsd
   if (total === 0) return 0
   return Math.round(((shortUsd - longUsd) / total) * 100)
+}
+
+/**
+ * Монеты для кнопок: по убыванию объёма, но только те, где стоят минимум
+ * `minWallets` разных китов. У монеты с одним кошельком перекос всегда 100% —
+ * это чужая одиночная ставка, а не мнение рынка, показывать её как сигнал нельзя.
+ */
+export function rankedCoins(snapshot: Snapshot, minWallets: number): string[] {
+  const walletsByCoin = new Map<string, Set<string>>()
+  for (const position of snapshot.positions) {
+    const wallets = walletsByCoin.get(position.coin) ?? new Set<string>()
+    wallets.add(position.address)
+    walletsByCoin.set(position.coin, wallets)
+  }
+  return coinSkews(snapshot)
+    .filter((skew) => (walletsByCoin.get(skew.coin)?.size ?? 0) >= minWallets)
+    .map((skew) => skew.coin)
 }
 
 export function coinSkews(snapshot: Snapshot): CoinSkew[] {

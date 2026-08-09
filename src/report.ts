@@ -2,7 +2,7 @@
 // Filename mirrors the reference bot: HL_whales_YYYY-MM-DD_HHMM.pdf (MSK time).
 
 import type { Snapshot } from './scan.js'
-import { coinSkews, skewPercent, topPositions, totalLongUsd, totalShortUsd } from './scan.js'
+import { MIN_POSITION_USD, coinSkews, skewPercent, topPositions, totalLongUsd, totalShortUsd } from './scan.js'
 import { priceCompact, shortAddress, signedUsd, usdCompact } from './format.js'
 
 const REPORT_TOP_ROWS = 20
@@ -31,7 +31,7 @@ export function reportCaption(snapshot: Snapshot): string {
     .join(', ')
   return [
     '🐳 Китовый отчёт · Hyperliquid',
-    `Перекос: ${side} ${Math.abs(skew)}% · ${snapshot.positions.length} позиций ≥ $1.00M`,
+    `Перекос: ${side} ${Math.abs(skew)}% · ${snapshot.positions.length} позиций ≥ ${usdCompact(MIN_POSITION_USD)}`,
     `Топ-монеты: ${topCoins}`,
   ].join('\n')
 }
@@ -79,7 +79,7 @@ export function reportHtml(snapshot: Snapshot): string {
     .footer { margin-top: 18px; color: #888; font-size: 9.5px; }
   </style></head><body>
     <h1>🐳 Китовый отчёт · Hyperliquid</h1>
-    <div class="sub">${generatedAt} МСК · ${snapshot.scannedWallets} кошельков · ${snapshot.positions.length} позиций ≥ $1.00M ·
+    <div class="sub">${generatedAt} МСК · ${snapshot.scannedWallets} кошельков · ${snapshot.positions.length} позиций ≥ ${usdCompact(MIN_POSITION_USD)} ·
       перекос: <b>${skew >= 0 ? 'ШОРТ' : 'ЛОНГ'} ${Math.abs(skew)}%</b> · лонги ${usdCompact(longUsd)} · шорты ${usdCompact(shortUsd)}</div>
     <h2>Топ-${REPORT_TOP_ROWS} позиций</h2>
     <table><tr><th>#</th><th>Монета</th><th>Сторона</th><th>Плечо</th><th>Вход</th><th>Ликв.</th><th>Кошелёк</th><th>Размер</th><th>uPnL</th></tr>${rows}</table>

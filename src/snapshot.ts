@@ -2,11 +2,12 @@
 // Mirrors the reference bot's "обновлено N мин назад" freshness model.
 
 import { fetchLeaderboard, type LeaderboardRow } from './hl.js'
-import { buildSnapshot, coinSkews, pickUniverse, type Snapshot } from './scan.js'
+import { buildSnapshot, pickUniverse, rankedCoins, type Snapshot } from './scan.js'
 
 const SNAPSHOT_REFRESH_MS = 4 * 60_000
 const LEADERBOARD_REFRESH_MS = 6 * 60 * 60_000
-const TOP_COINS_COUNT = 6
+const TOP_COINS_COUNT = 20
+const MIN_COIN_WALLETS = 3
 
 export class SnapshotService {
   private snapshot: Snapshot | null = null
@@ -61,11 +62,9 @@ export class SnapshotService {
     return this.snapshot !== null
   }
 
-  /** Top coins by whale notional — drives the dynamic coin buttons row. */
+  /** Top coins by whale notional — drives the dynamic coin buttons. */
   topCoins(): string[] {
-    return coinSkews(this.current())
-      .slice(0, TOP_COINS_COUNT)
-      .map((skew) => skew.coin)
+    return rankedCoins(this.current(), MIN_COIN_WALLETS).slice(0, TOP_COINS_COUNT)
   }
 
   leaderboardRows(): LeaderboardRow[] {

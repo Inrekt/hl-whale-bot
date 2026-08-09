@@ -4,7 +4,15 @@
 
 import type { LeaderboardRow, WhalePosition } from '../hl.js'
 import { priceCompact, shortAddress, signedUsd, usdCompact } from '../format.js'
-import { coinSkews, skewPercent, topPositions, totalLongUsd, totalShortUsd, type Snapshot } from '../scan.js'
+import {
+  MIN_POSITION_USD,
+  coinSkews,
+  skewPercent,
+  topPositions,
+  totalLongUsd,
+  totalShortUsd,
+  type Snapshot,
+} from '../scan.js'
 
 const TOP_ROWS = 10
 const LEADERBOARD_ALL_TIME_ROWS = 8
@@ -91,7 +99,7 @@ function freshness(ageMinutes: number): string {
 export function topWhalesCardHtml(snapshot: Snapshot, ageMinutes: number): string {
   const rows = topPositions(snapshot, null, TOP_ROWS).map(positionRow).join('')
   return page(`<div class="title">🐳 Топ китов · <span class="accent">Hyperliquid</span></div>
-    <div class="subtitle">${freshness(ageMinutes)} · позиции ≥ $1.00M</div>${rows}${footer}`)
+    <div class="subtitle">${freshness(ageMinutes)} · позиции ≥ ${usdCompact(MIN_POSITION_USD)}</div>${rows}${footer}`)
 }
 
 export function coinCardHtml(snapshot: Snapshot, coin: string, ageMinutes: number): string {
@@ -121,7 +129,7 @@ export function sentimentCardHtml(snapshot: Snapshot, ageMinutes: number): strin
     })
     .join('')
   return page(`<div class="title">📊 Настроение · <span class="accent">умные деньги</span></div>
-    <div class="subtitle">${freshness(ageMinutes)} · ${snapshot.positions.length} позиций ≥ $1.00M</div>
+    <div class="subtitle">${freshness(ageMinutes)} · ${snapshot.positions.length} позиций ≥ ${usdCompact(MIN_POSITION_USD)}</div>
     ${skewHeader(longUsd, shortUsd, snapshot.positions.length)}
     <div class="section">Перекос по монетам</div>${coinRows}${footer}`)
 }
