@@ -37,6 +37,7 @@ jobs:
             git worktree add --orphan -b state state || { git checkout --orphan state && git rm -rf . && git commit --allow-empty -m init && git push origin state && git checkout main && git worktree add state origin/state; }
           fi
       - name: Long-poll bot
+        id: bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           STATE_GIT: '1'
@@ -45,9 +46,20 @@ jobs:
             echo "BOT_TOKEN secret is not set — nothing to run yet"
             exit 0
           fi
-          npx tsx src/main.ts --max-runtime-minutes 340
+          started=$(date +%s)
+          npx tsx src/main.ts --max-runtime-minutes 340 || true
+          echo "uptime_sec=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+      # Цепочку продолжаем ТОЛЬКО если бот реально прожил смену. Быстрый выход
+      # значит системную поломку (протухший токен и т.п.) — иначе получаем шторм
+      # перезапусков раз в минуту. Из такой паузы нас вытащит cron выше.
       - name: Chain next run
-        if: always()
+        if: always() && steps.bot.outputs.uptime_sec != '' && steps.bot.outputs.uptime_sec > 1800
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run bot-runner.yml -R "$GITHUB_REPOSITORY"
+      - name: Report short run
+        if: always() && steps.bot.outputs.uptime_sec != '' && steps.bot.outputs.uptime_sec <= 1800
+        run: |
+          echo "::error::Бот прожил ${{ steps.bot.outputs.uptime_sec }}с (<30 мин) — цепочка остановлена."
+          echo "Проверь BOT_TOKEN. Следующая попытка — по расписанию cron."
+          exit 1
