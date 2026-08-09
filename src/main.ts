@@ -9,10 +9,17 @@ import { loadState, saveState, toStoredPositions } from './state.js'
 import { SnapshotService } from './snapshot.js'
 import { closeBrowser } from './render/render.js'
 import { diffPositions } from './watch.js'
+import { mskDay, pointFrom, recordPoint } from './history.js'
+import { coinSkews, skewPercent } from './scan.js'
 import { alertText } from './texts.js'
 
 const WATCH_INTERVAL_MS = 45_000
 const MIN_WATCH_POSITION_USD = 10_000
+const MARKET_TICK_MS = 4 * 60_000
+/** Насколько должен сдвинуться перекос, чтобы дёрнуть человека. Ниже — шум. */
+const ALERT_MOVE_POINTS = 25
+/** Монеты мельче этой книги дают громкие проценты на пустом месте. */
+const ALERT_MIN_BOOK_USD = 20_000_000
 const execFileAsync = promisify(execFile)
 
 try {
@@ -81,8 +88,51 @@ async function watchTick(): Promise<void> {
   if (stateChanged) await persist()
 }
 
-// Скан китов не блокирует запуск: в облаке он занимает 10-15 минут, и всё это
-// время бот был бы глухим. Пока данных нет, экраны отвечают texts.NOT_READY.
+/**
+ * Раз в сутки фиксируем точку отсчёта, а между тиками смотрим, не развернулся
+ * ли перекос по крупным монетам: смена стороны или скачок на четверть шкалы —
+ * это и есть новость, ради которой бота держат.
+ */
+async function marketTick(): Promise<void> {
+  if (!snapshots.isReady()) return
+  const snapshot = snapshots.current()
+  const today = mskDay(new Date())
+  const before = state.history.length
+  state.history = recordPoint(state.history, pointFrom(snapshot, today))
+
+  const messages: string[] = []
+  for (const { coin, longUsd, shortUsd } of coinSkews(snapshot)) {
+    if (longUsd + shortUsd < ALERT_MIN_BOOK_USD) continue
+    const skew = skewPercent(longUsd, shortUsd)
+    const known = state.alerted[coin]
+    if (known === undefined) {
+      state.alerted = { ...state.alerted, [coin]: skew }
+      continue
+    }
+    const flipped = Math.sign(known) !== Math.sign(skew) && Math.abs(skew) >= 10
+    const jumped = Math.abs(skew - known) >= ALERT_MOVE_POINTS
+    if (!flipped && !jumped) continue
+    state.alerted = { ...state.alerted, [coin]: skew }
+    const side = skew >= 0 ? 'ШОРТ' : 'ЛОНГ'
+    messages.push(
+      flipped
+        ? `🔄 ${coin}: киты развернулись — теперь ${side} ${Math.abs(skew)}% (было ${Math.abs(known)}% в другую сторону)`
+        : `⚡️ ${coin}: перекос ${side} ${Math.abs(skew)}% (был ${Math.abs(known)}%)`,
+    )
+  }
+
+  for (const message of messages) {
+    for (const chatId of state.subscribers) {
+      await bot.api.sendMessage(chatId, message).catch((error) => {
+        console.error(`market alert to ${chatId} failed:`, error instanceof Error ? error.message : error)
+      })
+    }
+  }
+  if (messages.length > 0 || state.history.length !== before) await persist()
+}
+
+// Скан китов не блокирует запуск: пока данных нет, экраны отвечают NOT_READY,
+// иначе бот был бы глухим всю первую минуту после каждой пересменки.
 console.log('launching bot; first whale scan runs in background…')
 void snapshots.start().then(
   () => console.log('snapshot ready'),
@@ -90,10 +140,12 @@ void snapshots.start().then(
 )
 
 const watchTimer = setInterval(() => void watchTick(), WATCH_INTERVAL_MS)
+const marketTimer = setInterval(() => void marketTick(), MARKET_TICK_MS)
 
 async function shutdown(reason: string): Promise<void> {
   console.log(`shutting down: ${reason}`)
   clearInterval(watchTimer)
+  clearInterval(marketTimer)
   snapshots.stop()
   await bot.stop().catch(() => undefined)
   await persistQueue

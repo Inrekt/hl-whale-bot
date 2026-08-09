@@ -6,7 +6,14 @@ import { Bot, Context, InlineKeyboard, InputFile } from 'grammy'
 import { configuredOwner, decideAccess } from './access.js'
 import type { BotState } from './state.js'
 import { SnapshotService } from './snapshot.js'
-import { coinCardHtml, leaderboardCardHtml, sentimentCardHtml, topWhalesCardHtml } from './render/cards.js'
+import {
+  coinCardHtml,
+  leaderboardCardHtml,
+  liquidationCardHtml,
+  sentimentCardHtml,
+  topWhalesCardHtml,
+} from './render/cards.js'
+import { deltaAgainst, mskDay, type SkewDelta } from './history.js'
 import { resolveCoin } from './scan.js'
 import { renderCardPng, renderPdf } from './render/render.js'
 import { reportCaption, reportFileName, reportHtml } from './report.js'
@@ -54,14 +61,14 @@ function cardNavKeyboard(): InlineKeyboard {
     .text('‹ Меню', 'menu')
 }
 
-function coinKeyboard(coins: readonly string[]): InlineKeyboard {
+function coinKeyboard(coins: readonly string[], current: string): InlineKeyboard {
   const keyboard = new InlineKeyboard()
   coins.forEach((coin, index) => {
-    keyboard.text(coin, `coin:${coin}`)
+    keyboard.text(coin === current ? `· ${coin} ·` : coin, `coin:${coin}`)
     if (index % 3 === 2) keyboard.row()
   })
   if (coins.length % 3 !== 0) keyboard.row()
-  return keyboard.text('🐳 Топ', 'top').row().text('‹ Меню', 'menu')
+  return keyboard.text(`🎯 Ликвидации ${current}`, `liq:${current}`).row().text('🐳 Топ', 'top').text('‹ Меню', 'menu')
 }
 
 function backKeyboard(): InlineKeyboard {
@@ -125,7 +132,7 @@ export function createBot(token: string, deps: BotDeps): Bot {
       return { kind: 'photo', png, caption: '🐳 Топ китов · Hyperliquid', keyboard: cardNavKeyboard() }
     },
     async sentiment(): Promise<Screen> {
-      const png = await renderCardPng(sentimentCardHtml(snapshots.current(), snapshots.ageMinutes()))
+      const png = await renderCardPng(sentimentCardHtml(snapshots.current(), snapshots.ageMinutes(), todayDelta()))
       return { kind: 'photo', png, caption: '📊 Настроение умных денег', keyboard: cardNavKeyboard() }
     },
     async leaderboard(): Promise<Screen> {
@@ -133,9 +140,23 @@ export function createBot(token: string, deps: BotDeps): Bot {
       return { kind: 'photo', png, caption: '🏆 Лучшие трейдеры Hyperliquid', keyboard: cardNavKeyboard() }
     },
     async coin(coin: string): Promise<Screen> {
-      const png = await renderCardPng(coinCardHtml(snapshots.current(), coin, snapshots.ageMinutes()))
-      return { kind: 'photo', png, caption: `🔎 ${coin} · киты`, keyboard: coinKeyboard(snapshots.topCoins()) }
+      const png = await renderCardPng(coinCardHtml(snapshots.current(), coin, snapshots.ageMinutes(), todayDelta()))
+      return { kind: 'photo', png, caption: `🔎 ${coin} · киты`, keyboard: coinKeyboard(snapshots.topCoins(), coin) }
     },
+    async liquidation(coin: string): Promise<Screen> {
+      const png = await renderCardPng(liquidationCardHtml(snapshots.current(), coin, snapshots.ageMinutes()))
+      return {
+        kind: 'photo',
+        png,
+        caption: `🎯 ${coin} · карта ликвидаций`,
+        keyboard: coinKeyboard(snapshots.topCoins(), coin),
+      }
+    },
+  }
+
+  /** Насколько перекос сдвинулся против прошлых суток — для подписи «+34 за сутки». */
+  function todayDelta(): SkewDelta {
+    return deltaAgainst(state.history, snapshots.current(), mskDay(new Date()))
   }
 
   async function guardReady(ctx: Context): Promise<boolean> {
@@ -202,6 +223,12 @@ export function createBot(token: string, deps: BotDeps): Bot {
     await ctx.answerCallbackQuery()
     const firstCoin = snapshots.topCoins()[0]
     if (firstCoin) await showScreen(ctx, await screens.coin(firstCoin))
+  })
+
+  bot.callbackQuery(/^liq:(.+)$/, async (ctx) => {
+    if (!(await guardReady(ctx))) return
+    await ctx.answerCallbackQuery()
+    await showScreen(ctx, await screens.liquidation(ctx.match[1] ?? ''))
   })
 
   bot.callbackQuery(/^coin:(.+)$/, async (ctx) => {

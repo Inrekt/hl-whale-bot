@@ -4,6 +4,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { WhalePosition } from './hl.js'
+import type { DailyPoint } from './history.js'
 
 const STATE_DIR = process.env.STATE_DIR ?? 'state'
 
@@ -26,6 +27,10 @@ export interface BotState {
   watchPositions: Record<string, StoredWatchPosition[]>
   /** YYYY-MM-DD (MSK) of the last daily report that was sent */
   lastDailyReport: string
+  /** одна точка на сутки: с чем сравнивать сегодняшний перекос */
+  history: DailyPoint[]
+  /** монета → перекос, о котором уже сообщили алертом (чтобы не повторяться) */
+  alerted: Record<string, number>
 }
 
 const EMPTY_STATE: BotState = {
@@ -34,6 +39,8 @@ const EMPTY_STATE: BotState = {
   watchlists: {},
   watchPositions: {},
   lastDailyReport: '',
+  history: [],
+  alerted: {},
 }
 
 const stateFilePath = (): string => join(STATE_DIR, 'bot-state.json')

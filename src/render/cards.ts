@@ -8,6 +8,9 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { liquidationDistance, type LeaderboardRow, type WhalePosition } from '../hl.js'
+import { EMPTY_DELTA, formatDelta, type SkewDelta } from '../history.js'
+import { biggestCluster, liquidationMap, type LiquidationLevel } from '../liquidation.js'
+import { whaleName } from '../whales.js'
 import { priceCompact, shortAddress, signedUsd, usdCompact } from '../format.js'
 import {
   MIN_POSITION_USD,
@@ -109,6 +112,24 @@ function page(body: string): string {
 
   /* Подпись карточки: запас хода до ликвидации. */
   .liq { margin-left: 8px; }
+  .who { color: ${IVORY}; opacity: .82; }
+  .delta { font-family: 'Plex', monospace; font-size: 11px; color: ${MUTE_TEXT}; margin-left: 9px; }
+  .cdelta { width: 46px; text-align: right; font-family: 'Plex', monospace; font-size: 10.5px; color: ${MUTE_TEXT}; }
+
+  /* Карта ликвидаций: лестница уровней от текущей цены вверх и вниз. */
+  .mark { display: flex; align-items: center; gap: 10px; margin: 16px 0 2px; }
+  .markpx { font-family: 'Plex', monospace; font-size: 15px; font-weight: 600; }
+  .marklabel { font-family: 'Plex', monospace; font-size: 10px; letter-spacing: 1.4px;
+    text-transform: uppercase; color: ${MUTE_TEXT}; }
+  .lvl { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px solid ${RULE}; }
+  .lvl:last-of-type { border-bottom: none; }
+  .lvlpx { width: 86px; font-family: 'Plex', monospace; font-size: 12px; }
+  .lvlbar { flex: 1; height: 7px; background: ${RULE}; border-radius: 4px; overflow: hidden; }
+  .lvlbar i { display: block; height: 100%; }
+  .lvlusd { width: 74px; text-align: right; font-family: 'Plex', monospace; font-size: 11.5px; }
+  .lvlwho { width: 62px; text-align: right; font-family: 'Plex', monospace; font-size: 10px; color: ${MUTE_TEXT}; }
+  .note { font-size: 13px; line-height: 1.45; color: ${IVORY}; opacity: .9; margin-top: 14px; }
+  .note b { color: ${BRASS}; font-weight: 600; }
 
   .skew { display: flex; align-items: baseline; justify-content: space-between; margin-top: 14px; }
   .skewbig { font-size: 30px; font-weight: 700; letter-spacing: -1px; }
@@ -167,7 +188,7 @@ function positionRow(position: WhalePosition, index: number, maxSizeUsd: number)
         <span class="side" style="color:${color}">${position.isLong ? 'LONG' : 'SHORT'}</span>
         <span class="lev">${position.leverage}×</span>
       </div>
-      <div class="sub">вход ${priceCompact(position.entryPx)} · ${shortAddress(position.address)}${liquidationChip(position)}</div>
+      <div class="sub"><span class="who">${escapeHtml(whaleName(position.address))}</span> ${shortAddress(position.address)} · вход ${priceCompact(position.entryPx)}${liquidationChip(position)}</div>
     </div>
     <div class="right">
       <div class="size">${usdCompact(position.sizeUsd)}</div>
@@ -176,13 +197,14 @@ function positionRow(position: WhalePosition, index: number, maxSizeUsd: number)
   </div>`
 }
 
-function skewBlock(longUsd: number, shortUsd: number, positionsCount: number): string {
+function skewBlock(longUsd: number, shortUsd: number, positionsCount: number, delta: number | null): string {
   const skew = skewPercent(longUsd, shortUsd)
   const shorted = skew >= 0
   const total = longUsd + shortUsd
   const longShare = total === 0 ? 50 : (longUsd / total) * 100
+  const move = formatDelta(delta)
   return `<div class="skew">
-      <div class="skewbig" style="color:${shorted ? SHORT : LONG}">${shorted ? 'ШОРТ' : 'ЛОНГ'} ${Math.abs(skew)}%</div>
+      <div class="skewbig" style="color:${shorted ? SHORT : LONG}">${shorted ? 'ШОРТ' : 'ЛОНГ'} ${Math.abs(skew)}%<span class="delta">${move ? `${move} за сутки` : ''}</span></div>
       <div class="skewlabel num">${positionsCount} поз.</div>
     </div>
     <div class="split"><i style="width:${longShare}%;background:${LONG}"></i><i style="width:${100 - longShare}%;background:${SHORT}"></i></div>
@@ -206,17 +228,17 @@ export function topWhalesCardHtml(snapshot: Snapshot, ageMinutes: number): strin
     <div class="hr"></div>${rowsHtml(positions)}${footer}`)
 }
 
-export function coinCardHtml(snapshot: Snapshot, coin: string, ageMinutes: number): string {
+export function coinCardHtml(snapshot: Snapshot, coin: string, ageMinutes: number, delta: SkewDelta = EMPTY_DELTA): string {
   const coinPositions = snapshot.positions.filter((p) => p.coin === coin)
   const longUsd = coinPositions.filter((p) => p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
   const shortUsd = coinPositions.filter((p) => !p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
   const wallets = new Set(coinPositions.map((p) => p.address)).size
   return page(`${head(`Hyperliquid · ${coin}`, `${escapeHtml(coin)} · киты`, `${freshness(ageMinutes)} · ${wallets} китов`)}
-    ${skewBlock(longUsd, shortUsd, coinPositions.length)}
+    ${skewBlock(longUsd, shortUsd, coinPositions.length, delta.byCoin[coin] ?? null)}
     <div class="hr"></div>${rowsHtml(coinPositions.slice(0, TOP_ROWS))}${footer}`)
 }
 
-export function sentimentCardHtml(snapshot: Snapshot, ageMinutes: number): string {
+export function sentimentCardHtml(snapshot: Snapshot, ageMinutes: number, delta: SkewDelta = EMPTY_DELTA): string {
   const longUsd = totalLongUsd(snapshot)
   const shortUsd = totalShortUsd(snapshot)
   const skews = coinSkews(snapshot).slice(0, SENTIMENT_COIN_ROWS)
@@ -234,11 +256,12 @@ export function sentimentCardHtml(snapshot: Snapshot, ageMinutes: number): strin
           <i style="width:${longShare}%;background:${LONG}"></i><i style="width:${100 - longShare}%;background:${SHORT}"></i>
         </div></div>
         <div class="cval">${usdCompact(total)}</div>
+        <div class="cdelta">${formatDelta(delta.byCoin[coin])}</div>
       </div>`
     })
     .join('')
   return page(`${head('Hyperliquid · умные деньги', 'Настроение', `${freshness(ageMinutes)} · ${snapshot.positions.length} позиций от ${usdCompact(MIN_POSITION_USD)}`)}
-    ${skewBlock(longUsd, shortUsd, snapshot.positions.length)}
+    ${skewBlock(longUsd, shortUsd, snapshot.positions.length, delta.overall)}
     <div class="section">Перекос по монетам</div>${coinRows}${footer}`)
 }
 
@@ -265,4 +288,47 @@ export function leaderboardCardHtml(rows: readonly LeaderboardRow[]): string {
     ${allTime.map((row, index) => renderRow(row, index, row.allTimePnl, best)).join('')}
     <div class="section">За сутки</div>
     ${day.map((row, index) => renderRow(row, index, row.dayPnl, dayBest)).join('')}${footer}`)
+}
+
+/**
+ * Карта ликвидаций: где стоят принудительные закрытия китов. Уровни, на которых
+ * скопились крупные суммы, работают магнитом — вынос одного кита двигает цену
+ * дальше и цепляет следующих, поэтому именно туда рынок и тянет.
+ */
+export function liquidationCardHtml(snapshot: Snapshot, coin: string, ageMinutes: number): string {
+  const positions = snapshot.positions.filter((p) => p.coin === coin)
+  const map = liquidationMap(positions)
+  const meta = `${freshness(ageMinutes)} · ${positions.length} позиций`
+  if (!map) {
+    return page(`${head(`Hyperliquid · ${coin}`, `${escapeHtml(coin)} · ликвидации`, meta)}
+      <div class="note">Рядом с текущей ценой скоплений нет: ликвидации китов дальше 60% хода,
+      то есть каскад отсюда не начнётся.</div>${footer}`)
+  }
+
+  const widest = Math.max(...[...map.above, ...map.below].map((level) => level.usd))
+  const levelRow = (level: LiquidationLevel): string => {
+    const color = level.isLong ? LONG : SHORT
+    const width = widest === 0 ? 0 : Math.max(4, (level.usd / widest) * 100)
+    return `<div class="lvl">
+      <div class="lvlpx">${priceCompact(level.price)}</div>
+      <div class="lvlbar"><i style="width:${width}%;background:${color}"></i></div>
+      <div class="lvlusd" style="color:${color}">${usdCompact(level.usd)}</div>
+      <div class="lvlwho">${level.wallets} кит${level.wallets === 1 ? '' : level.wallets < 5 ? 'а' : 'ов'}</div>
+    </div>`
+  }
+
+  const magnet = biggestCluster(map)
+  const note = magnet
+    ? `<div class="note">Сильнее всего тянет к <b>${priceCompact(magnet.price)}</b> — это
+       ${Math.round(magnet.distance * 100)}% хода ${magnet.isLong ? 'вниз' : 'вверх'}, там вынесет
+       <b>${usdCompact(magnet.usd)}</b> ${magnet.isLong ? 'лонгов' : 'шортов'} у ${magnet.wallets}
+       ${magnet.wallets === 1 ? 'кита' : 'китов'}.</div>`
+    : ''
+
+  return page(`${head(`Hyperliquid · ${coin}`, `${escapeHtml(coin)} · ликвидации`, meta)}
+    <div class="mark"><div class="markpx">${priceCompact(map.markPx)}</div>
+      <div class="marklabel">цена сейчас · всего под ударом ${usdCompact(map.totalUsd)}</div></div>
+    ${map.above.length > 0 ? `<div class="section">Выше — вынесет шорты</div>${[...map.above].reverse().map(levelRow).join('')}` : ''}
+    ${map.below.length > 0 ? `<div class="section">Ниже — вынесет лонги</div>${map.below.map(levelRow).join('')}` : ''}
+    ${note}${footer}`)
 }

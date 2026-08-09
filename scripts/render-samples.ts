@@ -5,7 +5,13 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fetchLeaderboard } from '../src/hl.js'
 import { buildSnapshot, coinSkews, pickUniverse } from '../src/scan.js'
-import { coinCardHtml, leaderboardCardHtml, sentimentCardHtml, topWhalesCardHtml } from '../src/render/cards.js'
+import {
+  coinCardHtml,
+  leaderboardCardHtml,
+  liquidationCardHtml,
+  sentimentCardHtml,
+  topWhalesCardHtml,
+} from '../src/render/cards.js'
 import { closeBrowser, renderCardPng, renderPdf } from '../src/render/render.js'
 import { reportFileName, reportHtml } from '../src/report.js'
 
@@ -27,6 +33,7 @@ const topCoin = coinSkews(snapshot)[0]?.coin ?? 'BTC'
 const outputs: Array<[string, Buffer]> = [
   ['card-top.png', await renderCardPng(topWhalesCardHtml(snapshot, 0))],
   [`card-coin-${topCoin}.png`, await renderCardPng(coinCardHtml(snapshot, topCoin, 2))],
+  [`card-liq-${topCoin}.png`, await renderCardPng(liquidationCardHtml(snapshot, topCoin, 2))],
   ['card-sentiment.png', await renderCardPng(sentimentCardHtml(snapshot, 0))],
   ['card-leaderboard.png', await renderCardPng(leaderboardCardHtml(rows))],
   [reportFileName(), await renderPdf(reportHtml(snapshot))],
