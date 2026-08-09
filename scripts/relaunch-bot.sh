@@ -11,7 +11,9 @@ cd "$(dirname "$0")/.."
 
 TOKEN="${1:-}"
 if [ -z "$TOKEN" ]; then
-  read -r TOKEN
+  # `read` возвращает 1 на EOF без перевода строки, хотя переменную уже заполнил,
+  # поэтому под `set -e` глушим код возврата и проверяем результат ниже.
+  IFS= read -r TOKEN || true
 fi
 TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
 if [ -z "$TOKEN" ]; then
