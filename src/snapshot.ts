@@ -16,11 +16,16 @@ export class SnapshotService {
   private refreshing: Promise<void> | null = null
   private timer: NodeJS.Timeout | null = null
 
-  async start(): Promise<void> {
-    await this.refresh()
+  /**
+   * Запускает первый скан и периодическое обновление. Промис первого скана
+   * возвращается, но ждать его не обязательно: таймер уже заведён, поэтому
+   * упавший первый скан не оставит сервис без данных навсегда.
+   */
+  start(): Promise<void> {
     this.timer = setInterval(() => {
       void this.refresh().catch((error) => console.error('snapshot refresh failed:', error))
     }, SNAPSHOT_REFRESH_MS)
+    return this.refresh()
   }
 
   stop(): void {

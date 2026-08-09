@@ -4,7 +4,10 @@
 import { fetchPositions, mapWithConcurrency, type LeaderboardRow, type WhalePosition } from './hl.js'
 
 export const MIN_POSITION_USD = 1_000_000
-const SCAN_CONCURRENCY = 5
+// Лимит Hyperliquid — 1200 единиц веса в минуту на IP, запрос позиций весит 2,
+// то есть допустимо ~600 запросов в минуту. При 10 параллельных и ~1с на запрос
+// выходит ~600/мин — впритык к потолку, поэтому выше не поднимаем.
+const SCAN_CONCURRENCY = 10
 
 export interface CoinSkew {
   readonly coin: string

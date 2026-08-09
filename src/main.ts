@@ -81,9 +81,13 @@ async function watchTick(): Promise<void> {
   if (stateChanged) await persist()
 }
 
-console.log('starting: initial whale scan…')
-await snapshots.start()
-console.log('snapshot ready, launching bot')
+// Скан китов не блокирует запуск: в облаке он занимает 10-15 минут, и всё это
+// время бот был бы глухим. Пока данных нет, экраны отвечают texts.NOT_READY.
+console.log('launching bot; first whale scan runs in background…')
+void snapshots.start().then(
+  () => console.log('snapshot ready'),
+  (error) => console.error('initial snapshot failed:', error),
+)
 
 const watchTimer = setInterval(() => void watchTick(), WATCH_INTERVAL_MS)
 
