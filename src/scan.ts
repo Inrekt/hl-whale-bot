@@ -19,25 +19,45 @@ export interface Snapshot {
 }
 
 /**
- * Минимальный размер счёта для юниверса китов. Калибровано по оригиналу
- * (scripts/threshold.ts): при $8M профиль совпадает — ~200 позиций ≥ $1M,
- * средний размер ~$12M. Порог выше → перекос концентрированнее.
+ * Кит должен пройти два порога: держать серьёзный счёт И доказать, что умеет
+ * зарабатывать. Отбор только по размеру счёта тащил в выборку убыточные
+ * кошельки с огромными позициями (scripts/quality.ts): их ставки гасили ставки
+ * настоящих китов, и перекос схлопывался в ~2% — сигнала не оставалось.
  */
-export const UNIVERSE_MIN_ACCOUNT_USD = 8_000_000
-const UNIVERSE_MAX_WALLETS = 500
+export const UNIVERSE_MIN_ACCOUNT_USD = 5_000_000
+export const UNIVERSE_MIN_PROFIT_USD = 5_000_000
+const UNIVERSE_MAX_WALLETS = 400
 
-/** Picks the whale universe: every account holding at least the floor value. */
+/** Picks the whale universe: proven-profitable accounts, richest profits first. */
 export function pickUniverse(rows: readonly LeaderboardRow[]): string[] {
   return [...rows]
-    .filter((row) => row.accountValue >= UNIVERSE_MIN_ACCOUNT_USD)
-    .sort((a, b) => b.accountValue - a.accountValue)
+    .filter(
+      (row) => row.accountValue >= UNIVERSE_MIN_ACCOUNT_USD && row.allTimePnl >= UNIVERSE_MIN_PROFIT_USD,
+    )
+    .sort((a, b) => b.allTimePnl - a.allTimePnl)
     .slice(0, UNIVERSE_MAX_WALLETS)
     .map((row) => row.address)
+}
+
+/**
+ * Двусторонняя книга — почерк маркет-мейкера: лонги и шорты сопоставимы по
+ * объёму, значит это не ставка на направление, а торговля спредом. Такие
+ * позиции показывать как «мнение кита» нельзя.
+ */
+export function isMarketMakerBook(positions: readonly WhalePosition[]): boolean {
+  const big = positions.filter((p) => p.sizeUsd >= MIN_POSITION_USD)
+  if (big.length < 4) return false
+  const longUsd = big.filter((p) => p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
+  const shortUsd = big.filter((p) => !p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
+  const smaller = Math.min(longUsd, shortUsd)
+  const larger = Math.max(longUsd, shortUsd)
+  return larger > 0 && smaller / larger >= 0.6
 }
 
 export async function buildSnapshot(addresses: readonly string[]): Promise<Snapshot> {
   const perWallet = await mapWithConcurrency(addresses, SCAN_CONCURRENCY, fetchPositions)
   const positions = perWallet
+    .filter((wallet) => !isMarketMakerBook(wallet))
     .flat()
     .filter((position) => position.sizeUsd >= MIN_POSITION_USD)
     .sort((a, b) => b.sizeUsd - a.sizeUsd)

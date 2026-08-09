@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest'
 import {
   UNIVERSE_MIN_ACCOUNT_USD,
+  UNIVERSE_MIN_PROFIT_USD,
   coinSkews,
+  isMarketMakerBook,
   pickUniverse,
   skewPercent,
   topPositions,
@@ -34,20 +36,46 @@ const snapshot: Snapshot = {
 }
 
 describe('pickUniverse', () => {
-  const row = (address: string, accountValue: number): LeaderboardRow => ({
+  const row = (address: string, accountValue: number, allTimePnl: number): LeaderboardRow => ({
     address,
     accountValue,
     dayPnl: 0,
-    allTimePnl: 0,
+    allTimePnl,
   })
 
-  test('keeps only accounts at or above the floor, sorted by value', () => {
+  const rich = UNIVERSE_MIN_ACCOUNT_USD * 10
+  const proven = UNIVERSE_MIN_PROFIT_USD * 10
+
+  test('keeps accounts that are both large and proven profitable, best profit first', () => {
     const rows = [
-      row('0xsmall', UNIVERSE_MIN_ACCOUNT_USD - 1),
-      row('0xmid', UNIVERSE_MIN_ACCOUNT_USD),
-      row('0xbig', UNIVERSE_MIN_ACCOUNT_USD * 10),
+      row('0xproven', rich, UNIVERSE_MIN_PROFIT_USD),
+      row('0xbest', rich, proven),
+      row('0xsmallaccount', UNIVERSE_MIN_ACCOUNT_USD - 1, proven),
     ]
-    expect(pickUniverse(rows)).toEqual(['0xbig', '0xmid'])
+    expect(pickUniverse(rows)).toEqual(['0xbest', '0xproven'])
+  })
+
+  test('drops big accounts that never made money', () => {
+    const rows = [row('0xloser', rich, -8_700_000), row('0xflat', rich, 0)]
+    expect(pickUniverse(rows)).toEqual([])
+  })
+})
+
+describe('isMarketMakerBook', () => {
+  const big = (isLong: boolean, sizeUsd: number): WhalePosition => ({
+    ...position('BTC', isLong, sizeUsd),
+  })
+
+  test('flags a book whose longs and shorts roughly cancel out', () => {
+    expect(isMarketMakerBook([big(true, 10e6), big(true, 9e6), big(false, 10e6), big(false, 8e6)])).toBe(true)
+  })
+
+  test('keeps a directional book', () => {
+    expect(isMarketMakerBook([big(false, 10e6), big(false, 9e6), big(false, 8e6), big(true, 1e6)])).toBe(false)
+  })
+
+  test('ignores books too small to judge', () => {
+    expect(isMarketMakerBook([big(true, 10e6), big(false, 10e6)])).toBe(false)
   })
 })
 
