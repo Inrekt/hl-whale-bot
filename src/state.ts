@@ -16,6 +16,8 @@ export interface StoredWatchPosition {
 }
 
 export interface BotState {
+  /** telegram user id the bot answers to; claimed by the first user who writes */
+  ownerId: number | null
   /** chat ids subscribed to the daily report */
   subscribers: number[]
   /** chat id → tracked wallet addresses */
@@ -27,6 +29,7 @@ export interface BotState {
 }
 
 const EMPTY_STATE: BotState = {
+  ownerId: null,
   subscribers: [],
   watchlists: {},
   watchPositions: {},

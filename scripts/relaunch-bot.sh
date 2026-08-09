@@ -34,21 +34,19 @@ printf 'BOT_TOKEN=%s\n' "$TOKEN" > .env
 echo "3/5 Ставлю секрет ${REPO}…"
 printf '%s' "$TOKEN" | gh secret set BOT_TOKEN -R "$REPO"
 
-echo "4/5 Архивирую подписчиков старого бота и обнуляю состояние…"
+# Состояние обнуляем начисто: список подписчиков старого бота новому боту
+# бесполезен (написать можно только тем, кто сам нажал /start), а репозиторий
+# публичный — чужим telegram id в нём не место.
+echo "4/5 Обнуляю состояние…"
 git fetch -q origin state
 rm -rf .state-relaunch
 git worktree add -q --detach .state-relaunch origin/state
 (
   cd .state-relaunch
-  STAMP="$(date -u +%Y-%m-%d)"
-  if [ -f bot-state.json ]; then
-    cp bot-state.json "subscribers-archive-${STAMP}.json"
-    echo "    старый список сохранён в state:subscribers-archive-${STAMP}.json"
-  fi
-  printf '{"subscribers":[],"watchlists":{},"lastDailyReport":""}\n' > bot-state.json
+  printf '{"ownerId":null,"subscribers":[],"watchlists":{},"lastDailyReport":""}\n' > bot-state.json
   git add -A
   git -c user.name="whale-bot" -c user.email="whale-bot@users.noreply.github.com" \
-    commit -q -m "state: reset for @${USERNAME} (previous bot deleted with its owner account)"
+    commit -q --amend -m "state: reset for @${USERNAME}"
   git push -q --force origin HEAD:state
 )
 git worktree remove --force .state-relaunch
@@ -59,4 +57,5 @@ gh workflow run bot-runner -R "$REPO"
 
 echo
 echo "Готово. Бот @${USERNAME} поднимается — первая карточка будет через ~3 минуты."
-echo "Напиши ему /start, чтобы подписаться на ежедневный отчёт."
+echo "ВАЖНО: напиши ему /start ПЕРВЫМ — кто написал первым, тот и владелец;"
+echo "всем остальным бот молча не отвечает."

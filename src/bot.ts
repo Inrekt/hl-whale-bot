@@ -3,6 +3,7 @@
 // when message kind changes (text↔photo) the old one is replaced.
 
 import { Bot, Context, InlineKeyboard, InputFile } from 'grammy'
+import { configuredOwner, decideAccess } from './access.js'
 import type { BotState } from './state.js'
 import { SnapshotService } from './snapshot.js'
 import { coinCardHtml, leaderboardCardHtml, sentimentCardHtml, topWhalesCardHtml } from './render/cards.js'
@@ -105,6 +106,17 @@ async function showScreen(ctx: Context, screen: Screen): Promise<void> {
 export function createBot(token: string, deps: BotDeps): Bot {
   const { snapshots, state, persist } = deps
   const bot = new Bot(token)
+  const envOwner = configuredOwner(process.env.OWNER_ID)
+
+  bot.use(async (ctx, next) => {
+    const decision = decideAccess(ctx.from?.id, envOwner ?? state.ownerId)
+    if (decision === 'deny') return
+    if (decision === 'claim' && ctx.from) {
+      state.ownerId = ctx.from.id
+      await persist()
+    }
+    await next()
+  })
 
   const screens = {
     async top(): Promise<Screen> {
