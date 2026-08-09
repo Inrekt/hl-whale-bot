@@ -73,7 +73,7 @@ async function watchTick(): Promise<void> {
       stateChanged = true
       if (previous === undefined) continue // first observation — baseline only
       for (const event of diffPositions(previous, current)) {
-        const message = alertText(address, event)
+        const message = alertText(address, event, state.whaleNames)
         for (const [chatId, list] of Object.entries(state.watchlists)) {
           if (!list.some((a) => a.toLowerCase() === address)) continue
           await bot.api.sendMessage(Number(chatId), message).catch((error) => {

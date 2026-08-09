@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path'
 import { liquidationDistance, type LeaderboardRow, type WhalePosition } from '../hl.js'
 import { EMPTY_DELTA, formatDelta, type SkewDelta } from '../history.js'
 import { biggestCluster, liquidationMap, type LiquidationLevel } from '../liquidation.js'
-import { whaleName } from '../whales.js'
+import { nameOf, type WhaleNames } from '../whales.js'
 import { priceCompact, shortAddress, signedUsd, usdCompact } from '../format.js'
 import {
   MIN_POSITION_USD,
@@ -38,6 +38,10 @@ const MUTE_TEXT = '#7C8595'
 const BRASS = '#D6B26A'
 const LONG = '#4FA88B'
 const SHORT = '#C4634F'
+// Прибыль красится отдельными, более глубокими тонами: направление уже занято
+// рейлом слева, а «в плюсе или нет» должно читаться с одного взгляда.
+const PNL_UP = '#3E9C74'
+const PNL_DOWN = '#BF5140'
 
 const FONTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../assets/fonts')
 
@@ -111,7 +115,7 @@ function page(body: string): string {
   .pnl { font-family: 'Plex', monospace; font-size: 10.5px; color: ${MUTE_TEXT}; margin-top: 4px; }
 
   /* Подпись карточки: запас хода до ликвидации. */
-  .liq { margin-left: 8px; }
+  .liq { white-space: nowrap; }
   .who { color: ${IVORY}; opacity: .82; }
   .delta { font-family: 'Plex', monospace; font-size: 11px; color: ${MUTE_TEXT}; margin-left: 9px; }
   .cdelta { width: 46px; text-align: right; font-family: 'Plex', monospace; font-size: 10.5px; color: ${MUTE_TEXT}; }
@@ -162,22 +166,22 @@ function head(eyebrow: string, title: string, meta: string): string {
 }
 
 /**
- * Метка появляется, только когда ликвидация реально близко: у большинства
- * позиций она за горизонтом, и «99+%» в каждой строке был бы шумом.
+ * Цена принудительного закрытия — уровень, который держат в голове. Подсвечен,
+ * когда до него близко: ниже десятой доли хода — тревожно, ниже четверти — стоит
+ * присмотреть.
  */
-const LIQUIDATION_ALARM = 0.4
-
-function liquidationChip(position: WhalePosition): string {
+function liquidationCell(position: WhalePosition): string {
+  if (position.liquidationPx === null) return ' · ликв —'
   const distance = liquidationDistance(position)
-  if (distance === null || distance >= LIQUIDATION_ALARM) return ''
-  const color = distance < 0.1 ? SHORT : BRASS
-  return `<span class="liq" style="color:${color}">до ликв. ${Math.round(distance * 100)}%</span>`
+  const color = distance === null || distance >= 0.25 ? MUTE_TEXT : distance < 0.1 ? SHORT : BRASS
+  return ` · <span class="liq" style="color:${color}">ликв ${priceCompact(position.liquidationPx)}</span>`
 }
 
-function positionRow(position: WhalePosition, index: number, maxSizeUsd: number): string {
+function positionRow(position: WhalePosition, index: number, maxSizeUsd: number, names: WhaleNames): string {
   const color = position.isLong ? LONG : SHORT
   const magnitude = maxSizeUsd === 0 ? 0 : Math.round((position.sizeUsd / maxSizeUsd) * 100)
-  const arrow = position.unrealizedPnl >= 0 ? '▲' : '▼'
+  const winning = position.unrealizedPnl >= 0
+  const arrow = winning ? '▲' : '▼'
   return `<div class="row">
     <div class="mag" style="width:${magnitude}%;background:${color}"></div>
     <div class="rail" style="background:${color}"></div>
@@ -188,11 +192,11 @@ function positionRow(position: WhalePosition, index: number, maxSizeUsd: number)
         <span class="side" style="color:${color}">${position.isLong ? 'LONG' : 'SHORT'}</span>
         <span class="lev">${position.leverage}×</span>
       </div>
-      <div class="sub"><span class="who">${escapeHtml(whaleName(position.address))}</span> ${shortAddress(position.address)} · вход ${priceCompact(position.entryPx)}${liquidationChip(position)}</div>
+      <div class="sub"><span class="who">${escapeHtml(nameOf(position.address, names))}</span> ${shortAddress(position.address)} · вход ${priceCompact(position.entryPx)}${liquidationCell(position)}</div>
     </div>
     <div class="right">
       <div class="size">${usdCompact(position.sizeUsd)}</div>
-      <div class="pnl">${arrow} ${signedUsd(position.unrealizedPnl)}</div>
+      <div class="pnl" style="color:${winning ? PNL_UP : PNL_DOWN}">${arrow} ${signedUsd(position.unrealizedPnl)}</div>
     </div>
   </div>`
 }
@@ -217,25 +221,31 @@ function freshness(ageMinutes: number): string {
   return ageMinutes < 1 ? 'обновлено только что' : `обновлено ${ageMinutes} мин назад`
 }
 
-function rowsHtml(positions: readonly WhalePosition[]): string {
+function rowsHtml(positions: readonly WhalePosition[], names: WhaleNames): string {
   const max = positions[0]?.sizeUsd ?? 0
-  return positions.map((position, index) => positionRow(position, index, max)).join('')
+  return positions.map((position, index) => positionRow(position, index, max, names)).join('')
 }
 
-export function topWhalesCardHtml(snapshot: Snapshot, ageMinutes: number): string {
+export function topWhalesCardHtml(snapshot: Snapshot, ageMinutes: number, names: WhaleNames = {}): string {
   const positions = topPositions(snapshot, null, TOP_ROWS)
   return page(`${head('Hyperliquid · крупнейшие позиции', 'Топ китов', `${freshness(ageMinutes)} · от ${usdCompact(MIN_POSITION_USD)}`)}
-    <div class="hr"></div>${rowsHtml(positions)}${footer}`)
+    <div class="hr"></div>${rowsHtml(positions, names)}${footer}`)
 }
 
-export function coinCardHtml(snapshot: Snapshot, coin: string, ageMinutes: number, delta: SkewDelta = EMPTY_DELTA): string {
+export function coinCardHtml(
+  snapshot: Snapshot,
+  coin: string,
+  ageMinutes: number,
+  delta: SkewDelta = EMPTY_DELTA,
+  names: WhaleNames = {},
+): string {
   const coinPositions = snapshot.positions.filter((p) => p.coin === coin)
   const longUsd = coinPositions.filter((p) => p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
   const shortUsd = coinPositions.filter((p) => !p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
   const wallets = new Set(coinPositions.map((p) => p.address)).size
   return page(`${head(`Hyperliquid · ${coin}`, `${escapeHtml(coin)} · киты`, `${freshness(ageMinutes)} · ${wallets} китов`)}
     ${skewBlock(longUsd, shortUsd, coinPositions.length, delta.byCoin[coin] ?? null)}
-    <div class="hr"></div>${rowsHtml(coinPositions.slice(0, TOP_ROWS))}${footer}`)
+    <div class="hr"></div>${rowsHtml(coinPositions.slice(0, TOP_ROWS), names)}${footer}`)
 }
 
 export function sentimentCardHtml(snapshot: Snapshot, ageMinutes: number, delta: SkewDelta = EMPTY_DELTA): string {

@@ -4,6 +4,7 @@
 
 import type { WatchEvent } from './watch.js'
 import { priceCompact, shortAddress, usdCompact } from './format.js'
+import { nameOf, type WhaleNames } from './whales.js'
 
 export const WELCOME = [
   '🐳 Китовый отслеживатель Hyperliquid',
@@ -36,19 +37,26 @@ export const HELP = [
 ].join('\n')
 
 export const WATCH_INTRO = [
-  '🐙 Слежка за китом',
+  '⭐ Избранные киты',
   '',
-  'Добавь адрес кошелька Hyperliquid — и я буду присылать тебе личные алерты, когда он открывает/закрывает/переворачивает позицию или меняет её на 25%+.',
+  'Добавь адрес кошелька Hyperliquid — и я пришлю уведомление, как только он откроет, закроет или перевернёт позицию либо изменит её на 25%+.',
   '',
-  'Нажми «➕ Добавить кита» и пришли адрес (0x…).',
+  'Нажми «➕ Добавить кита» и пришли адрес (0x…). Кнопка с карандашом переименовывает кита: имя будет видно во всех карточках.',
 ].join('\n')
 
 export const WATCH_ASK_ADDRESS = 'Пришли адрес кошелька (0x…, 42 символа):'
 export const WATCH_BAD_ADDRESS = 'Это не похоже на адрес Hyperliquid. Нужен формат 0x… (42 символа). Попробуй ещё раз:'
-export const WATCH_ADDED = (address: string): string => `✅ Кит ${shortAddress(address)} добавлен. Слежу за его позициями.`
+export const WATCH_ADDED = (address: string, names: WhaleNames): string =>
+  `✅ ${nameOf(address, names)} (${shortAddress(address)}) в избранном. Пришлю уведомление, когда он что-то сделает.`
 export const WATCH_EXISTS = 'Этот кит уже в твоём списке.'
 export const WATCH_REMOVED = (address: string): string => `🗑 Кит ${shortAddress(address)} удалён из списка.`
 export const WATCH_LIMIT = 'Лимит — 10 китов на пользователя. Удали кого-нибудь из списка.'
+
+export const RENAME_ASK = (address: string, names: WhaleNames): string =>
+  `Как назвать этого кита? Сейчас — ${nameOf(address, names)} (${shortAddress(address)}). Пришли новое имя одним сообщением:`
+export const RENAME_BAD = 'Пустое имя не подойдёт. Пришли что-нибудь читаемое:'
+export const RENAME_DONE = (address: string, name: string): string =>
+  `✏️ Готово: ${shortAddress(address)} теперь ${name}. Имя появится во всех карточках.`
 
 export const SUBSCRIBED = '🔔 Подписал! Отчёт будет приходить ежедневно в 10:00 МСК.'
 export const UNSUBSCRIBED = '🔕 Отписал от ежедневного отчёта. Нажми ещё раз, чтобы подписаться.'
@@ -56,9 +64,9 @@ export const PDF_PREPARING = '📄 Готовлю свежий PDF-отчёт, ~
 export const SCANNING = '🔍 Сканирую китов, ~минуту…'
 export const NOT_READY = 'Собираю данные, попробуй через минуту…'
 
-export function alertText(address: string, event: WatchEvent): string {
+export function alertText(address: string, event: WatchEvent, names: WhaleNames = {}): string {
   const side = event.isLong ? 'LONG' : 'SHORT'
-  const base = `${shortAddress(address)} · ${event.coin}`
+  const base = `${nameOf(address, names)} · ${event.coin}`
   const detail = `${usdCompact(event.sizeUsd)}, ${event.leverage}x, вход ${priceCompact(event.entryPx)}`
   switch (event.kind) {
     case 'open':

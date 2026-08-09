@@ -49,6 +49,9 @@ function hash(value: string): number {
   return result
 }
 
+/** Адрес в нижнем регистре → имя, которое человек задал сам. */
+export type WhaleNames = Readonly<Record<string, string>>
+
 /**
  * Имя кита по адресу. Совпадения имён возможны (китов больше, чем имён),
  * поэтому рядом всегда печатается укороченный адрес — он и остаётся точным
@@ -58,4 +61,18 @@ export function whaleName(address: string): string {
   const normalized = address.toLowerCase()
   const name = NAMES[hash(normalized) % NAMES.length]
   return name ?? 'Кит'
+}
+
+/** Своё имя важнее выданного автоматически. */
+export function nameOf(address: string, names: WhaleNames): string {
+  return names[address.toLowerCase()] ?? whaleName(address)
+}
+
+export const MAX_WHALE_NAME_LENGTH = 24
+
+/** Имя пишется в карточку, поэтому режем длину и запрещаем перевод строки. */
+export function sanitizeWhaleName(raw: string): string | null {
+  const trimmed = raw.replace(/\s+/g, ' ').trim()
+  if (trimmed.length === 0) return null
+  return trimmed.slice(0, MAX_WHALE_NAME_LENGTH)
 }

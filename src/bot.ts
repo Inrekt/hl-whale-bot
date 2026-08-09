@@ -14,6 +14,7 @@ import {
   topWhalesCardHtml,
 } from './render/cards.js'
 import { deltaAgainst, mskDay, type SkewDelta } from './history.js'
+import { nameOf, sanitizeWhaleName } from './whales.js'
 import { resolveCoin } from './scan.js'
 import { renderCardPng, renderPdf } from './render/render.js'
 import { reportCaption, reportFileName, reportHtml } from './report.js'
@@ -34,6 +35,8 @@ type Screen =
   | { kind: 'photo'; png: Buffer; caption: string; keyboard: InlineKeyboard }
 
 const pendingAddress = new Set<number>()
+/** chat id → адрес кита, которому владелец сейчас придумывает имя */
+const pendingRename = new Map<number, string>()
 
 function mainMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
@@ -43,7 +46,7 @@ function mainMenuKeyboard(): InlineKeyboard {
     .text('🔎 По монете', 'coins')
     .text('🏆 Лидерборд', 'leaderboard')
     .row()
-    .text('🐙 Слежка за китом', 'watch')
+    .text('⭐ Избранные киты', 'watch')
     .text('📄 PDF-отчёт', 'pdf')
     .row()
     .text('🔔 Подписка', 'sub')
@@ -75,10 +78,13 @@ function backKeyboard(): InlineKeyboard {
   return new InlineKeyboard().text('‹ Меню', 'menu')
 }
 
-function watchKeyboard(watched: readonly string[]): InlineKeyboard {
+function watchKeyboard(watched: readonly string[], names: Readonly<Record<string, string>>): InlineKeyboard {
   const keyboard = new InlineKeyboard().text('➕ Добавить кита', 'watch:add').row()
   for (const address of watched) {
-    keyboard.text(`❌ ${shortAddress(address)}`, `watch:del:${address}`).row()
+    keyboard
+      .text(`✏️ ${nameOf(address, names)}`, `watch:rename:${address}`)
+      .text('❌', `watch:del:${address}`)
+      .row()
   }
   return keyboard.text('‹ Меню', 'menu')
 }
@@ -128,7 +134,7 @@ export function createBot(token: string, deps: BotDeps): Bot {
 
   const screens = {
     async top(): Promise<Screen> {
-      const png = await renderCardPng(topWhalesCardHtml(snapshots.current(), snapshots.ageMinutes()))
+      const png = await renderCardPng(topWhalesCardHtml(snapshots.current(), snapshots.ageMinutes(), state.whaleNames))
       return { kind: 'photo', png, caption: '🐳 Топ китов · Hyperliquid', keyboard: cardNavKeyboard() }
     },
     async sentiment(): Promise<Screen> {
@@ -140,7 +146,9 @@ export function createBot(token: string, deps: BotDeps): Bot {
       return { kind: 'photo', png, caption: '🏆 Лучшие трейдеры Hyperliquid', keyboard: cardNavKeyboard() }
     },
     async coin(coin: string): Promise<Screen> {
-      const png = await renderCardPng(coinCardHtml(snapshots.current(), coin, snapshots.ageMinutes(), todayDelta()))
+      const png = await renderCardPng(
+        coinCardHtml(snapshots.current(), coin, snapshots.ageMinutes(), todayDelta(), state.whaleNames),
+      )
       return { kind: 'photo', png, caption: `🔎 ${coin} · киты`, keyboard: coinKeyboard(snapshots.topCoins(), coin) }
     },
     async liquidation(coin: string): Promise<Screen> {
@@ -263,7 +271,7 @@ export function createBot(token: string, deps: BotDeps): Bot {
     await ctx.answerCallbackQuery()
     const chatId = ctx.chatId
     if (chatId === undefined) return
-    await showScreen(ctx, { kind: 'text', text: texts.WATCH_INTRO, keyboard: watchKeyboard(watchedBy(chatId)) })
+    await showScreen(ctx, { kind: 'text', text: texts.WATCH_INTRO, keyboard: watchKeyboard(watchedBy(chatId), state.whaleNames) })
   })
 
   bot.callbackQuery('watch:add', async (ctx) => {
@@ -288,12 +296,37 @@ export function createBot(token: string, deps: BotDeps): Bot {
       [String(chatId)]: watchedBy(chatId).filter((a) => a.toLowerCase() !== address.toLowerCase()),
     }
     await persist()
-    await showScreen(ctx, { kind: 'text', text: texts.WATCH_REMOVED(address), keyboard: watchKeyboard(watchedBy(chatId)) })
+    await showScreen(ctx, { kind: 'text', text: texts.WATCH_REMOVED(address), keyboard: watchKeyboard(watchedBy(chatId), state.whaleNames) })
+  })
+
+  bot.callbackQuery(/^watch:rename:(0x[0-9a-fA-F]{40})$/, async (ctx) => {
+    await ctx.answerCallbackQuery()
+    const chatId = ctx.chatId
+    const address = ctx.match[1]
+    if (chatId === undefined || address === undefined) return
+    pendingRename.set(chatId, address.toLowerCase())
+    await ctx.reply(texts.RENAME_ASK(address, state.whaleNames))
   })
 
   bot.on('message:text', async (ctx) => {
     const chatId = ctx.chatId
     const text = ctx.message.text.trim()
+
+    const renaming = pendingRename.get(chatId)
+    if (renaming !== undefined) {
+      const name = sanitizeWhaleName(text)
+      if (name === null) {
+        await ctx.reply(texts.RENAME_BAD)
+        return
+      }
+      pendingRename.delete(chatId)
+      state.whaleNames = { ...state.whaleNames, [renaming]: name }
+      await persist()
+      await ctx.reply(texts.RENAME_DONE(renaming, name), {
+        reply_markup: watchKeyboard(watchedBy(chatId), state.whaleNames),
+      })
+      return
+    }
 
     if (pendingAddress.has(chatId)) {
       if (!ADDRESS_PATTERN.test(text)) {
@@ -304,12 +337,14 @@ export function createBot(token: string, deps: BotDeps): Bot {
       const address = text.toLowerCase()
       const current = watchedBy(chatId)
       if (current.some((a) => a.toLowerCase() === address)) {
-        await ctx.reply(texts.WATCH_EXISTS, { reply_markup: watchKeyboard(current) })
+        await ctx.reply(texts.WATCH_EXISTS, { reply_markup: watchKeyboard(current, state.whaleNames) })
         return
       }
       state.watchlists = { ...state.watchlists, [String(chatId)]: [...current, address] }
       await persist()
-      await ctx.reply(texts.WATCH_ADDED(address), { reply_markup: watchKeyboard([...current, address]) })
+      await ctx.reply(texts.WATCH_ADDED(address, state.whaleNames), {
+        reply_markup: watchKeyboard([...current, address], state.whaleNames),
+      })
       return
     }
 

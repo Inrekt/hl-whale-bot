@@ -31,6 +31,8 @@ export interface BotState {
   history: DailyPoint[]
   /** монета → перекос, о котором уже сообщили алертом (чтобы не повторяться) */
   alerted: Record<string, number>
+  /** адрес в нижнем регистре → имя, которое владелец дал киту сам */
+  whaleNames: Record<string, string>
 }
 
 const EMPTY_STATE: BotState = {
@@ -41,6 +43,7 @@ const EMPTY_STATE: BotState = {
   lastDailyReport: '',
   history: [],
   alerted: {},
+  whaleNames: {},
 }
 
 const stateFilePath = (): string => join(STATE_DIR, 'bot-state.json')
