@@ -107,6 +107,29 @@ if (maxRuntimeMinutes !== null && Number.isFinite(maxRuntimeMinutes)) {
 process.once('SIGINT', () => void shutdown('SIGINT'))
 process.once('SIGTERM', () => void shutdown('SIGTERM'))
 
-await bot.start({
-  onStart: (info) => console.log(`long-poll started as @${info.username}`),
-})
+/**
+ * Telegram отдаёт getUpdates только одному потребителю: любой посторонний вызов
+ * (второй инстанс, отладочный curl) обрывает опрос бота ошибкой 409, и grammY
+ * считает её фатальной. Одиночный чужой запрос не должен ронять смену на часы,
+ * поэтому на 409 переподключаемся с нарастающей паузой.
+ */
+const CONFLICT_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000]
+
+function isConflictError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { error_code?: number }).error_code === 409
+}
+
+for (let attempt = 0; ; attempt += 1) {
+  try {
+    await bot.start({
+      onStart: (info) => console.log(`long-poll started as @${info.username}`),
+    })
+    break
+  } catch (error) {
+    const delay = CONFLICT_RETRY_DELAYS_MS[attempt]
+    if (!isConflictError(error) || delay === undefined) throw error
+    console.error(`getUpdates conflict — другой потребитель; повтор через ${delay / 1000}с`)
+    await bot.stop().catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, delay))
+  }
+}

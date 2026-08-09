@@ -61,5 +61,6 @@ jobs:
         if: always() && steps.bot.outputs.uptime_sec != '' && steps.bot.outputs.uptime_sec <= 1800
         run: |
           echo "::error::Бот прожил ${{ steps.bot.outputs.uptime_sec }}с (<30 мин) — цепочка остановлена."
-          echo "Проверь BOT_TOKEN. Следующая попытка — по расписанию cron."
+          echo "Смотри лог шага выше: обычно это протухший BOT_TOKEN или чужой"
+          echo "getUpdates (409). Следующая попытка — по расписанию cron."
           exit 1
