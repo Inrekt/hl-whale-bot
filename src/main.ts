@@ -16,6 +16,8 @@ import { alertText } from './texts.js'
 const WATCH_INTERVAL_MS = 45_000
 const MIN_WATCH_POSITION_USD = 10_000
 const MARKET_TICK_MS = 4 * 60_000
+/** Как часто отмечаться живым. Реже, чем тик: каждая отметка — коммит в репозиторий. */
+const HEARTBEAT_INTERVAL_MS = 20 * 60_000
 /** Насколько должен сдвинуться перекос, чтобы дёрнуть человека. Ниже — шум. */
 const ALERT_MOVE_POINTS = 25
 /** Монеты мельче этой книги дают громкие проценты на пустом месте. */
@@ -96,9 +98,16 @@ async function watchTick(): Promise<void> {
 async function marketTick(): Promise<void> {
   if (!snapshots.isReady()) return
   const snapshot = snapshots.current()
-  const today = mskDay(new Date())
+  const now = new Date()
+  const today = mskDay(now)
   const before = state.history.length
   state.history = recordPoint(state.history, pointFrom(snapshot, today))
+
+  // Пульс: сторож в .github/workflows/watchdog.yml сверяет его возраст и, если
+  // бот замолчал, поднимает смену заново и пишет владельцу.
+  const beatAge = now.getTime() - Date.parse(state.heartbeat || '1970-01-01T00:00:00Z')
+  const beat = Number.isNaN(beatAge) || beatAge >= HEARTBEAT_INTERVAL_MS
+  if (beat) state.heartbeat = now.toISOString()
 
   const messages: string[] = []
   for (const { coin, longUsd, shortUsd } of coinSkews(snapshot)) {
@@ -128,7 +137,7 @@ async function marketTick(): Promise<void> {
       })
     }
   }
-  if (messages.length > 0 || state.history.length !== before) await persist()
+  if (messages.length > 0 || beat || state.history.length !== before) await persist()
 }
 
 // Скан китов не блокирует запуск: пока данных нет, экраны отвечают NOT_READY,

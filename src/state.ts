@@ -33,6 +33,8 @@ export interface BotState {
   alerted: Record<string, number>
   /** адрес в нижнем регистре → имя, которое владелец дал киту сам */
   whaleNames: Record<string, string>
+  /** ISO-время последнего признака жизни: по нему сторож понимает, жив ли бот */
+  heartbeat: string
 }
 
 const EMPTY_STATE: BotState = {
@@ -44,6 +46,7 @@ const EMPTY_STATE: BotState = {
   history: [],
   alerted: {},
   whaleNames: {},
+  heartbeat: '',
 }
 
 const stateFilePath = (): string => join(STATE_DIR, 'bot-state.json')

@@ -1,0 +1,66 @@
+# Сторож. Бот отмечается «жив» в ветке state каждые 20 минут; если отметка
+# протухла, значит смена оборвалась — поднимаем цепочку заново и пишем владельцу.
+# Молчание бота иначе выглядит как «просто ничего не происходит».
+name: watchdog
+
+on:
+  schedule:
+    - cron: '43 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: state
+          fetch-depth: 1
+
+      - name: Check heartbeat
+        id: check
+        run: |
+          if [ ! -f bot-state.json ]; then
+            echo "state file missing — нечего проверять"
+            exit 0
+          fi
+          BEAT=$(jq -r '.heartbeat // ""' bot-state.json)
+          OWNER=$(jq -r '.ownerId // empty' bot-state.json)
+          echo "owner=$OWNER" >> "$GITHUB_OUTPUT"
+          if [ -z "$BEAT" ]; then
+            echo "пульса ещё не было — бот не успел отметиться"
+            exit 0
+          fi
+          AGE=$(( $(date -u +%s) - $(date -u -d "$BEAT" +%s) ))
+          echo "последний пульс: $BEAT (${AGE}s назад)"
+          echo "age=$AGE" >> "$GITHUB_OUTPUT"
+          # 45 минут: пульс раз в 20 минут плюс запас на пересменку и первый скан.
+          if [ "$AGE" -gt 2700 ]; then
+            echo "stale=1" >> "$GITHUB_OUTPUT"
+            echo "::warning::Бот молчит ${AGE}s — поднимаю смену"
+          fi
+
+      - name: Restart the bot
+        if: steps.check.outputs.stale == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow enable bot-runner -R "$GITHUB_REPOSITORY" || true
+          gh workflow run bot-runner -R "$GITHUB_REPOSITORY"
+
+      - name: Tell the owner
+        if: steps.check.outputs.stale == '1' && steps.check.outputs.owner != ''
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          MINUTES=$(( ${{ steps.check.outputs.age }} / 60 ))
+          TEXT="⚠️ Бот молчал ${MINUTES} мин — смена оборвалась. Запустил заново, данные не потеряны."
+          curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${{ steps.check.outputs.owner }}" \
+            --data-urlencode "text=${TEXT}" \
+            -o /dev/null -w "telegram: %{http_code}\n"
