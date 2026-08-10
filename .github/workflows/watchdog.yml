@@ -5,8 +5,14 @@ name: watchdog
 
 on:
   schedule:
-    - cron: '43 */2 * * *'
+    # Раз в час: порог протухания 45 минут, значит о смерти узнаём в пределах часа.
+    - cron: '43 * * * *'
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: 'Прислать тестовый пуш, не трогая бота'
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -66,12 +72,14 @@ jobs:
           gh workflow run bot-runner -R "$GITHUB_REPOSITORY"
 
       - name: Tell the owner
-        if: steps.check.outputs.stale == '1' && steps.check.outputs.owner != ''
+        if: (steps.check.outputs.stale == '1' || inputs.test_alert) && steps.check.outputs.owner != ''
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
-          MINUTES=$(( ${{ steps.check.outputs.age }} / 60 ))
-          if [ "$MINUTES" -gt 0 ]; then
+          MINUTES=$(( ${{ steps.check.outputs.age || 0 }} / 60 ))
+          if [ "${{ inputs.test_alert }}" = "true" ]; then
+            TEXT="🔧 Проверка сторожа. Так будет выглядеть уведомление, если бот замолчит — он же его и починит. Ничего делать не нужно."
+          elif [ "$MINUTES" -gt 0 ]; then
             TEXT="⚠️ Бот молчал ${MINUTES} мин — смена оборвалась. Запустил заново, данные не потеряны."
           else
             TEXT="⚠️ Бот не работал — смены не было. Запустил заново, данные не потеряны."
