@@ -2,7 +2,7 @@
 // Navigation mirrors the reference bot: one UI message edited in place;
 // when message kind changes (text↔photo) the old one is replaced.
 
-import { Bot, Context, InlineKeyboard, InputFile } from 'grammy'
+import { Bot, Context, GrammyError, InlineKeyboard, InputFile } from 'grammy'
 import { configuredOwner, decideAccess } from './access.js'
 import type { BotState } from './state.js'
 import { SnapshotService } from './snapshot.js'
@@ -13,6 +13,7 @@ import {
   sentimentCardHtml,
   topWhalesCardHtml,
 } from './render/cards.js'
+import { buildCoinView, encodeCoinView, parseCoinView, type CoinFilter, type CoinView } from './coinView.js'
 import { deltaAgainst, mskDay, type SkewDelta } from './history.js'
 import { nameOf, sanitizeWhaleName } from './whales.js'
 import { resolveCoin } from './scan.js'
@@ -64,6 +65,7 @@ function cardNavKeyboard(): InlineKeyboard {
     .text('‹ Меню', 'menu')
 }
 
+/** Сетка выбора монеты — используется как есть только экраном ликвидаций. */
 function coinKeyboard(coins: readonly string[], current: string): InlineKeyboard {
   const keyboard = new InlineKeyboard()
   coins.forEach((coin, index) => {
@@ -72,6 +74,49 @@ function coinKeyboard(coins: readonly string[], current: string): InlineKeyboard
   })
   if (coins.length % 3 !== 0) keyboard.row()
   return keyboard.text(`🎯 Ликвидации ${current}`, `liq:${current}`).row().text('🐳 Топ', 'top').text('‹ Меню', 'menu')
+}
+
+const FILTER_BUTTON_LABEL: Readonly<Record<CoinFilter, string>> = { all: 'Все', long: 'Лонги', short: 'Шорты' }
+
+/**
+ * Клавиатура карточки монеты: ряд фильтров, ряд листания (только когда есть
+ * что листать), сетка монет 4 в ряд — вместо 3, как у coinKeyboard, — чтобы
+ * добавленные два ряда не подняли общую высоту клавиатуры выше нынешней.
+ */
+function coinViewKeyboard(coins: readonly string[], view: CoinView): InlineKeyboard {
+  const keyboard = new InlineKeyboard()
+  const counts: Readonly<Record<CoinFilter, number>> = {
+    all: view.coinTotal,
+    long: view.longCount,
+    short: view.shortCount,
+  }
+  for (const filter of ['all', 'long', 'short'] as const) {
+    const label = `${filter === view.filter ? '· ' : ''}${FILTER_BUTTON_LABEL[filter]} ${counts[filter]}${filter === view.filter ? ' ·' : ''}`
+    const data = filter === view.filter ? 'noop' : encodeCoinView(view.coin, filter, 1)
+    keyboard.text(label, data)
+  }
+  keyboard.row()
+
+  if (view.pageCount > 1) {
+    const prevData = view.page > 1 ? encodeCoinView(view.coin, view.filter, view.page - 1) : 'noop'
+    const nextData = view.page < view.pageCount ? encodeCoinView(view.coin, view.filter, view.page + 1) : 'noop'
+    keyboard
+      .text(view.page > 1 ? '‹' : '·', prevData)
+      .text(`${view.page}/${view.pageCount}`, 'noop')
+      .text(view.page < view.pageCount ? '›' : '·', nextData)
+      .row()
+  }
+
+  coins.forEach((coin, index) => {
+    keyboard.text(coin === view.coin ? `· ${coin} ·` : coin, `coin:${coin}`)
+    if (index % 4 === 3) keyboard.row()
+  })
+  if (coins.length % 4 !== 0) keyboard.row()
+  return keyboard
+    .text(`🎯 Ликвидации ${view.coin}`, `liq:${view.coin}`)
+    .row()
+    .text('🐳 Топ', 'top')
+    .text('‹ Меню', 'menu')
 }
 
 function backKeyboard(): InlineKeyboard {
@@ -89,6 +134,11 @@ function watchKeyboard(watched: readonly string[], names: Readonly<Record<string
   return keyboard.text('‹ Меню', 'menu')
 }
 
+/** Правда только для безобидного «редактирование ничего не изменило». */
+function isNotModifiedError(error: unknown): boolean {
+  return error instanceof GrammyError && error.description.includes('message is not modified')
+}
+
 /** Edit the tapped message when possible, otherwise replace it. */
 async function showScreen(ctx: Context, screen: Screen): Promise<void> {
   const viaCallback = ctx.callbackQuery !== undefined
@@ -103,7 +153,10 @@ async function showScreen(ctx: Context, screen: Screen): Promise<void> {
         )
       }
       return
-    } catch {
+    } catch (error) {
+      // Идентичный контент — не поломка: карточка уже показывает то, что нужно,
+      // удалять и слать заново значит зря прыгнуть сообщением в конец чата.
+      if (isNotModifiedError(error)) return
       await ctx.deleteMessage().catch(() => undefined)
     }
   }
@@ -145,11 +198,23 @@ export function createBot(token: string, deps: BotDeps): Bot {
       const png = await renderCardPng(leaderboardCardHtml(snapshots.leaderboardRows()))
       return { kind: 'photo', png, caption: '🏆 Лучшие трейдеры Hyperliquid', keyboard: cardNavKeyboard() }
     },
-    async coin(coin: string): Promise<Screen> {
+    async coin(coin: string, filter: CoinFilter = 'all', page = 1): Promise<Screen> {
+      // Строится один раз и переиспользуется для клавиатуры и подписи — тот же
+      // просчёт, что и внутри coinCardHtml (O(n) по ≤600 позициям), но так не
+      // нужно тащить CoinView через публичный API рендера и ломать render-samples.
+      const view = buildCoinView(snapshots.current().positions, coin, filter, page)
       const png = await renderCardPng(
-        coinCardHtml(snapshots.current(), coin, snapshots.ageMinutes(), todayDelta(), state.whaleNames),
+        coinCardHtml(snapshots.current(), coin, snapshots.ageMinutes(), todayDelta(), state.whaleNames, {
+          filter,
+          page,
+        }),
       )
-      return { kind: 'photo', png, caption: `🔎 ${coin} · киты`, keyboard: coinKeyboard(snapshots.topCoins(), coin) }
+      return {
+        kind: 'photo',
+        png,
+        caption: texts.coinCaption(coin, view.filter, view.page, view.pageCount),
+        keyboard: coinViewKeyboard(snapshots.topCoins(), view),
+      }
     },
     async liquidation(coin: string): Promise<Screen> {
       const png = await renderCardPng(liquidationCardHtml(snapshots.current(), coin, snapshots.ageMinutes()))
@@ -239,6 +304,21 @@ export function createBot(token: string, deps: BotDeps): Bot {
     await showScreen(ctx, await screens.liquidation(ctx.match[1] ?? ''))
   })
 
+  // Нажатие на уже активный фильтр/страницу/недоступную стрелку: только «принято»,
+  // без рендера и без edit — иначе Telegram ответил бы «not modified» на
+  // побайтово идентичную карточку.
+  bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery())
+
+  bot.callbackQuery(/^cv:([als])(\d{1,3}):(.+)$/, async (ctx) => {
+    if (!(await guardReady(ctx))) return
+    const parsed = parseCoinView(ctx.callbackQuery.data)
+    if (!parsed) return ctx.answerCallbackQuery()
+    await ctx.answerCallbackQuery()
+    await showScreen(ctx, await screens.coin(parsed.coin, parsed.filter, parsed.page))
+  })
+
+  // Отдельный префикс `cv:` не пересекается с этим — жадный `/^coin:(.+)$/`
+  // молча проглотил бы `cv:l2:SOL`, если бы формат расширял именно этот вход.
   bot.callbackQuery(/^coin:(.+)$/, async (ctx) => {
     if (!(await guardReady(ctx))) return
     await ctx.answerCallbackQuery()

@@ -11,7 +11,8 @@ import { liquidationDistance, type LeaderboardRow, type WhalePosition } from '..
 import { EMPTY_DELTA, formatDelta, type SkewDelta } from '../history.js'
 import { biggestCluster, liquidationMap, type LiquidationLevel } from '../liquidation.js'
 import { nameOf, type WhaleNames } from '../whales.js'
-import { priceCompact, shortAddress, signedUsd, usdCompact } from '../format.js'
+import { buildCoinView, pageRangeLabel, type CoinFilter } from '../coinView.js'
+import { plural, priceCompact, shortAddress, signedUsd, usdCompact } from '../format.js'
 import {
   MIN_POSITION_USD,
   coinSkews,
@@ -177,15 +178,15 @@ function liquidationCell(position: WhalePosition): string {
   return ` · <span class="liq" style="color:${color}">ликв ${priceCompact(position.liquidationPx)}</span>`
 }
 
-function positionRow(position: WhalePosition, index: number, maxSizeUsd: number, names: WhaleNames): string {
+function positionRow(position: WhalePosition, rank: number, maxSizeUsd: number, names: WhaleNames): string {
   const color = position.isLong ? LONG : SHORT
-  const magnitude = maxSizeUsd === 0 ? 0 : Math.round((position.sizeUsd / maxSizeUsd) * 100)
+  const magnitude = maxSizeUsd === 0 ? 0 : Math.max(2, Math.round((position.sizeUsd / maxSizeUsd) * 100))
   const winning = position.unrealizedPnl >= 0
   const arrow = winning ? '▲' : '▼'
   return `<div class="row">
     <div class="mag" style="width:${magnitude}%;background:${color}"></div>
     <div class="rail" style="background:${color}"></div>
-    <div class="rank num">${index + 1}</div>
+    <div class="rank num">${rank}</div>
     <div class="mid">
       <div class="head">
         <span class="coin">${escapeHtml(position.coin)}</span>
@@ -221,9 +222,13 @@ function freshness(ageMinutes: number): string {
   return ageMinutes < 1 ? 'обновлено только что' : `обновлено ${ageMinutes} мин назад`
 }
 
-function rowsHtml(positions: readonly WhalePosition[], names: WhaleNames): string {
-  const max = positions[0]?.sizeUsd ?? 0
-  return positions.map((position, index) => positionRow(position, index, max, names)).join('')
+function rowsHtml(
+  positions: readonly WhalePosition[],
+  names: WhaleNames,
+  maxSizeUsd: number = positions[0]?.sizeUsd ?? 0,
+  rankOffset = 0,
+): string {
+  return positions.map((position, index) => positionRow(position, rankOffset + index + 1, maxSizeUsd, names)).join('')
 }
 
 export function topWhalesCardHtml(snapshot: Snapshot, ageMinutes: number, names: WhaleNames = {}): string {
@@ -232,20 +237,62 @@ export function topWhalesCardHtml(snapshot: Snapshot, ageMinutes: number, names:
     <div class="hr"></div>${rowsHtml(positions, names)}${footer}`)
 }
 
+const FILTER_LABEL: Readonly<Record<CoinFilter, string>> = { all: 'ВСЕ', long: 'ЛОНГИ', short: 'ШОРТЫ' }
+
+export interface CoinCardOptions {
+  readonly filter?: CoinFilter
+  readonly page?: number
+}
+
 export function coinCardHtml(
   snapshot: Snapshot,
   coin: string,
   ageMinutes: number,
   delta: SkewDelta = EMPTY_DELTA,
   names: WhaleNames = {},
+  options: CoinCardOptions = {},
 ): string {
-  const coinPositions = snapshot.positions.filter((p) => p.coin === coin)
-  const longUsd = coinPositions.filter((p) => p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
-  const shortUsd = coinPositions.filter((p) => !p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
-  const wallets = new Set(coinPositions.map((p) => p.address)).size
-  return page(`${head(`Hyperliquid · ${coin}`, `${escapeHtml(coin)} · киты`, `${freshness(ageMinutes)} · ${wallets} китов`)}
-    ${skewBlock(longUsd, shortUsd, coinPositions.length, delta.byCoin[coin] ?? null)}
-    <div class="hr"></div>${rowsHtml(coinPositions.slice(0, TOP_ROWS), names)}${footer}`)
+  const view = buildCoinView(snapshot.positions, coin, options.filter ?? 'all', options.page ?? 1)
+  const wallets = new Set(snapshot.positions.filter((p) => p.coin === coin).map((p) => p.address)).size
+  const meta = `${freshness(ageMinutes)} · ${wallets} ${plural(wallets, ['кит', 'кита', 'китов'])}`
+  const heading = head(`Hyperliquid · ${coin}`, `${escapeHtml(coin)} · киты`, meta)
+
+  // Монеты нет вовсе (устаревшая кнопка после обновления снимка): блок перекоса
+  // напечатал бы бессмысленные «ШОРТ 0%», поэтому его тут нет вообще.
+  if (view.coinTotal === 0) {
+    return page(`${heading}
+      <div class="note">Позиций по ${escapeHtml(coin)} сейчас нет: киты вышли или их размер упал
+      ниже ${usdCompact(MIN_POSITION_USD)}.</div>${footer}`)
+  }
+
+  const longUsd = snapshot.positions.filter((p) => p.coin === coin && p.isLong).reduce((sum, p) => sum + p.sizeUsd, 0)
+  const shortUsd = snapshot.positions
+    .filter((p) => p.coin === coin && !p.isLong)
+    .reduce((sum, p) => sum + p.sizeUsd, 0)
+  const skew = skewBlock(longUsd, shortUsd, view.coinTotal, delta.byCoin[coin] ?? null)
+
+  // Фильтр ничего не нашёл — не редкость: у части монет одной из сторон нет
+  // вовсе. Шапка и перекос остаются: односторонняя картина здесь и есть правда.
+  if (view.total === 0) {
+    const missingSide = view.filter === 'long' ? 'Лонгов' : 'Шортов'
+    const otherSide = view.filter === 'long' ? 'шорт' : 'лонг'
+    return page(`${heading}${skew}
+      <div class="note">${missingSide} по
+      ${escapeHtml(coin)} нет — все ${view.coinTotal} ${plural(view.coinTotal, ['позиция', 'позиции', 'позиций'])}
+      от ${usdCompact(MIN_POSITION_USD)} стоят в ${otherSide}. Кнопка «Все» вернёт полный список.</div>${footer}`)
+  }
+
+  // Строка фильтра появляется, только когда несёт смысл: у медианной монеты
+  // (3 позиции, одна страница, фильтр «все») она совпала бы с шапкой и просто
+  // дублировала бы «N поз.» из skewBlock.
+  const showFilterStrip = view.filter !== 'all' || view.pageCount > 1
+  const filterStrip = showFilterStrip
+    ? `<div class="section">${FILTER_LABEL[view.filter]} · ${pageRangeLabel(view)}</div>`
+    : '<div class="hr"></div>'
+
+  return page(
+    `${heading}${skew}${filterStrip}${rowsHtml(view.rows, names, view.maxSizeUsd, view.rankOffset)}${footer}`,
+  )
 }
 
 export function sentimentCardHtml(snapshot: Snapshot, ageMinutes: number, delta: SkewDelta = EMPTY_DELTA): string {
@@ -323,7 +370,7 @@ export function liquidationCardHtml(snapshot: Snapshot, coin: string, ageMinutes
       <div class="lvlpx">${priceCompact(level.price)}</div>
       <div class="lvlbar"><i style="width:${width}%;background:${color}"></i></div>
       <div class="lvlusd" style="color:${color}">${usdCompact(level.usd)}</div>
-      <div class="lvlwho">${level.wallets} кит${level.wallets === 1 ? '' : level.wallets < 5 ? 'а' : 'ов'}</div>
+      <div class="lvlwho">${level.wallets} ${plural(level.wallets, ['кит', 'кита', 'китов'])}</div>
     </div>`
   }
 
@@ -332,7 +379,7 @@ export function liquidationCardHtml(snapshot: Snapshot, coin: string, ageMinutes
     ? `<div class="note">Сильнее всего тянет к <b>${priceCompact(magnet.price)}</b> — это
        ${Math.round(magnet.distance * 100)}% хода ${magnet.isLong ? 'вниз' : 'вверх'}, там вынесет
        <b>${usdCompact(magnet.usd)}</b> ${magnet.isLong ? 'лонгов' : 'шортов'} у ${magnet.wallets}
-       ${magnet.wallets === 1 ? 'кита' : 'китов'}.</div>`
+       ${plural(magnet.wallets, ['кита', 'китов', 'китов'])}.</div>`
     : ''
 
   return page(`${head(`Hyperliquid · ${coin}`, `${escapeHtml(coin)} · ликвидации`, meta)}

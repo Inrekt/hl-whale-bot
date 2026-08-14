@@ -13,7 +13,7 @@ import {
   type Snapshot,
 } from './scan.js'
 import type { LeaderboardRow, WhalePosition } from './hl.js'
-import { shortAddress, signedUsd, usdCompact } from './format.js'
+import { plural, shortAddress, signedUsd, usdCompact } from './format.js'
 
 const position = (coin: string, isLong: boolean, sizeUsd: number): WhalePosition => ({
   address: '0x1234567890abcdef1234567890abcdef12345678',
@@ -126,5 +126,17 @@ describe('format', () => {
 
   test('shortAddress mirrors reference format', () => {
     expect(shortAddress('0x92eabcdef00000000000000000000000000050e9')).toBe('0x92ea...50e9')
+  })
+
+  test('plural picks the Russian form, including the 11-14 exception and n=21', () => {
+    const forms = ['кит', 'кита', 'китов'] as const
+    expect(plural(1, forms)).toBe('кит')
+    expect(plural(2, forms)).toBe('кита')
+    expect(plural(5, forms)).toBe('китов')
+    expect(plural(11, forms)).toBe('китов')
+    expect(plural(14, forms)).toBe('китов')
+    expect(plural(21, forms)).toBe('кит') // старый код на cards.ts:326 давал «21 китов»
+    expect(plural(22, forms)).toBe('кита')
+    expect(plural(111, forms)).toBe('китов')
   })
 })

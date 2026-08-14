@@ -5,6 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fetchLeaderboard } from '../src/hl.js'
 import { buildSnapshot, coinSkews, pickUniverse } from '../src/scan.js'
+import { buildCoinView } from '../src/coinView.js'
 import {
   coinCardHtml,
   leaderboardCardHtml,
@@ -30,6 +31,15 @@ const snapshot = await buildSnapshot(pickUniverse(rows).slice(0, SAMPLE_UNIVERSE
 console.log(`${snapshot.positions.length} positions ≥ $1M`)
 
 const topCoin = coinSkews(snapshot)[0]?.coin ?? 'BTC'
+
+// Живые кандидаты для проверки фильтра/листалки: монета с одиноким лонгом,
+// монета без единого лонга, монета с более чем одной страницей.
+const allCoins = [...new Set(snapshot.positions.map((p) => p.coin))]
+const views = new Map(allCoins.map((coin) => [coin, buildCoinView(snapshot.positions, coin, 'all', 1)]))
+const lonelyLongCoin = allCoins.find((c) => (views.get(c)?.longCount ?? 0) === 1)
+const noLongCoin = allCoins.find((c) => (views.get(c)?.longCount ?? 0) === 0 && (views.get(c)?.shortCount ?? 0) > 0)
+const multiPageCoin = [...views.entries()].sort((a, b) => b[1].pageCount - a[1].pageCount)[0]?.[0]
+
 const outputs: Array<[string, Buffer]> = [
   ['card-top.png', await renderCardPng(topWhalesCardHtml(snapshot, 0))],
   [`card-coin-${topCoin}.png`, await renderCardPng(coinCardHtml(snapshot, topCoin, 2))],
@@ -38,6 +48,33 @@ const outputs: Array<[string, Buffer]> = [
   ['card-leaderboard.png', await renderCardPng(leaderboardCardHtml(rows))],
   [reportFileName(), await renderPdf(reportHtml(snapshot))],
 ]
+
+if (lonelyLongCoin) {
+  outputs.push([
+    `card-coin-${lonelyLongCoin}-longs.png`,
+    await renderCardPng(coinCardHtml(snapshot, lonelyLongCoin, 2, undefined, {}, { filter: 'long' })),
+  ])
+} else {
+  console.log('нет монеты с ровно одним лонгом в этом снимке — образец пропущен')
+}
+
+if (noLongCoin) {
+  outputs.push([
+    `card-coin-${noLongCoin}-longs-empty.png`,
+    await renderCardPng(coinCardHtml(snapshot, noLongCoin, 2, undefined, {}, { filter: 'long' })),
+  ])
+} else {
+  console.log('нет монеты без лонгов в этом снимке — образец пропущен')
+}
+
+if (multiPageCoin && (views.get(multiPageCoin)?.pageCount ?? 1) > 1) {
+  outputs.push([
+    `card-coin-${multiPageCoin}-page2.png`,
+    await renderCardPng(coinCardHtml(snapshot, multiPageCoin, 2, undefined, {}, { filter: 'all', page: 2 })),
+  ])
+} else {
+  console.log('нет монеты с больше чем одной страницей в этом снимке — образец пропущен')
+}
 for (const [name, buffer] of outputs) {
   const path = join(outDir, name)
   await writeFile(path, buffer)

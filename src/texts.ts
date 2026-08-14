@@ -3,6 +3,7 @@
 // model (vault-rag/local.py) and hand-verified.
 
 import type { WatchEvent } from './watch.js'
+import type { CoinFilter } from './coinView.js'
 import { priceCompact, shortAddress, usdCompact } from './format.js'
 import { nameOf, type WhaleNames } from './whales.js'
 
@@ -63,6 +64,15 @@ export const UNSUBSCRIBED = '🔕 Отписал от ежедневного о�
 export const PDF_PREPARING = '📄 Готовлю свежий PDF-отчёт, ~минуту…'
 export const SCANNING = '🔍 Сканирую китов, ~минуту…'
 export const NOT_READY = 'Собираю данные, попробуй через минуту…'
+
+const FILTER_WORD: Readonly<Record<CoinFilter, string>> = { all: 'киты', long: 'лонги', short: 'шорты' }
+
+/** «SOL · киты» по умолчанию; «SOL · лонги · 2/4», когда фильтр или страница не первая. */
+export function coinCaption(coin: string, filter: CoinFilter, page: number, pageCount: number): string {
+  const isDefault = filter === 'all' && page === 1
+  const suffix = isDefault ? FILTER_WORD.all : `${FILTER_WORD[filter]} · ${page}/${pageCount}`
+  return `🔎 ${coin} · ${suffix}`
+}
 
 export function alertText(address: string, event: WatchEvent, names: WhaleNames = {}): string {
   const side = event.isLong ? 'LONG' : 'SHORT'
